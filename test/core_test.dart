@@ -24,6 +24,12 @@ void main() {
     expect(back.pages[1].filter, ScanFilter.document);
   });
 
+  test('OCR text survives JSON roundtrip and is omitted when null', () {
+    final withText = PageItem(file: 'a.jpg', text: 'Halo dunia');
+    expect(PageItem.fromJson(withText.toJson()).text, 'Halo dunia');
+    expect(PageItem(file: 'b.jpg').toJson().containsKey('text'), isFalse);
+  });
+
   test('unknown filter name falls back to document', () {
     final p = PageItem.fromJson({'file': 'x.jpg', 'filter': 'nope'});
     expect(p.filter, ScanFilter.document);

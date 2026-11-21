@@ -8,16 +8,21 @@
 }
 
 class PageItem {
-  PageItem({required this.file, this.turns = 0, this.filter = ScanFilter.document});
+  PageItem({required this.file, this.turns = 0, this.filter = ScanFilter.document, this.text});
 
   String file;
   int turns;
   ScanFilter filter;
 
-  Map<String, dynamic> toJson() => {'file': file, 'turns': turns, 'filter': filter.name};
+  /// Cached OCR result. Null means not recognized yet (or invalidated by rotation).
+  String? text;
+
+  Map<String, dynamic> toJson() =>
+      {'file': file, 'turns': turns, 'filter': filter.name, if (text != null) 'text': text};
 
   factory PageItem.fromJson(Map<String, dynamic> j) => PageItem(
         file: j['file'] as String,
+        text: j['text'] as String?,
         turns: j['turns'] as int? ?? 0,
         filter: ScanFilter.values.firstWhere(
           (f) => f.name == j['filter'],

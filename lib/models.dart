@@ -1,0 +1,53 @@
+﻿enum ScanFilter {
+  original('Asli'),
+  grayscale('Abu-abu'),
+  document('Dokumen');
+
+  const ScanFilter(this.label);
+  final String label;
+}
+
+class PageItem {
+  PageItem({required this.file, this.turns = 0, this.filter = ScanFilter.document});
+
+  String file;
+  int turns;
+  ScanFilter filter;
+
+  Map<String, dynamic> toJson() => {'file': file, 'turns': turns, 'filter': filter.name};
+
+  factory PageItem.fromJson(Map<String, dynamic> j) => PageItem(
+        file: j['file'] as String,
+        turns: j['turns'] as int? ?? 0,
+        filter: ScanFilter.values.firstWhere(
+          (f) => f.name == j['filter'],
+          orElse: () => ScanFilter.document,
+        ),
+      );
+}
+
+class Doc {
+  Doc({required this.id, required this.name, required this.created, List<PageItem>? pages})
+      : pages = pages ?? [];
+
+  final String id;
+  String name;
+  final DateTime created;
+  final List<PageItem> pages;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'created': created.toIso8601String(),
+        'pages': pages.map((p) => p.toJson()).toList(),
+      };
+
+  factory Doc.fromJson(Map<String, dynamic> j) => Doc(
+        id: j['id'] as String,
+        name: j['name'] as String,
+        created: DateTime.parse(j['created'] as String),
+        pages: (j['pages'] as List)
+            .map((p) => PageItem.fromJson(p as Map<String, dynamic>))
+            .toList(),
+      );
+}

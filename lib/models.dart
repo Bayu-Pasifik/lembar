@@ -1,7 +1,8 @@
 ﻿enum ScanFilter {
   original('Asli'),
-  grayscale('Abu-abu'),
-  document('Dokumen');
+  color('Warna'),
+  document('Dokumen'),
+  grayscale('Abu-abu');
 
   const ScanFilter(this.label);
   final String label;

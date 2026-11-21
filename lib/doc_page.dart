@@ -3,14 +3,11 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:share_plus/share_plus.dart';
 
-import 'filters.dart';
 import 'models.dart';
 import 'page_viewer.dart';
 import 'pdf_export.dart';
 import 'scan_actions.dart';
 import 'store.dart';
-
-const _noFilter = ColorFilter.mode(Colors.transparent, BlendMode.dst);
 
 class DocPage extends StatefulWidget {
   const DocPage({super.key, required this.store, required this.doc});
@@ -105,12 +102,9 @@ class _DocPageState extends State<DocPage> {
                           SizedBox(
                             width: 64,
                             height: 84,
-                            child: ColorFiltered(
-                              colorFilter: previewFilter(p.filter) ?? _noFilter,
-                              child: RotatedBox(
-                                quarterTurns: p.turns,
-                                child: Image.file(File(p.file), fit: BoxFit.contain, cacheWidth: 240),
-                              ),
+                            child: RotatedBox(
+                              quarterTurns: p.turns,
+                              child: Image.file(File(p.file), fit: BoxFit.contain, cacheWidth: 240),
                             ),
                           ),
                           const SizedBox(width: 14),

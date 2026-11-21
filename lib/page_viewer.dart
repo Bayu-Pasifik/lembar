@@ -1,15 +1,11 @@
-﻿import 'dart:io';
-
-import 'package:flutter/services.dart';
+﻿import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:share_plus/share_plus.dart';
 
-import 'filters.dart';
 import 'models.dart';
 import 'ocr.dart';
+import 'page_image.dart';
 import 'store.dart';
-
-const _noFilter = ColorFilter.mode(Colors.transparent, BlendMode.dst);
 
 class PageViewer extends StatefulWidget {
   const PageViewer({super.key, required this.store, required this.doc, required this.initial});
@@ -168,32 +164,22 @@ class _PageViewerState extends State<PageViewer> {
           final p = doc.pages[i];
           return InteractiveViewer(
             maxScale: 5,
-            child: Center(
-              child: ColorFiltered(
-                colorFilter: previewFilter(p.filter) ?? _noFilter,
-                child: RotatedBox(
-                  quarterTurns: p.turns,
-                  child: Image.file(File(p.file), fit: BoxFit.contain),
-                ),
-              ),
-            ),
+            child: PageImage(page: p),
           );
         },
       ),
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          child: Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 8,
             children: [
               for (final f in ScanFilter.values)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: ChoiceChip(
-                    label: Text(f.label),
-                    selected: page.filter == f,
-                    onSelected: (_) => _setFilter(f),
-                  ),
+                ChoiceChip(
+                  label: Text(f.label),
+                  selected: page.filter == f,
+                  onSelected: (_) => _setFilter(f),
                 ),
             ],
           ),

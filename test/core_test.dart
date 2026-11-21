@@ -63,6 +63,49 @@ void main() {
       expect(px.r, greaterThan(230));
     });
 
+    test('document filter removes a shadow gradient and keeps the ink', () async {
+      // Paper lit from 110 (dark, left) to 230 (bright, right) with a dark text bar.
+      final paper = img.Image(width: 400, height: 300);
+      for (final p in paper) {
+        final v = 110 + (120 * p.x / 399).round();
+        p
+          ..r = v
+          ..g = v
+          ..b = v;
+      }
+      img.fillRect(paper, x1: 150, y1: 140, x2: 250, y2: 150, color: img.ColorRgb8(30, 30, 30));
+      final f = '${dir.path}/shadow.png';
+      await File(f).writeAsBytes(img.encodePng(paper));
+
+      final r = await processPage(PageJob(f, 0, ScanFilter.document));
+      final out = img.decodeJpg(r.bytes)!;
+      expect(out.getPixel(15, 40).r, greaterThan(235), reason: 'dark side of paper');
+      expect(out.getPixel(385, 40).r, greaterThan(235), reason: 'bright side of paper');
+      expect(out.getPixel(200, 145).r, lessThan(90), reason: 'ink stays dark');
+    });
+
+    test('colour filter keeps hue but whitens the paper', () async {
+      final paper = img.Image(width: 200, height: 200);
+      img.fill(paper, color: img.ColorRgb8(180, 170, 140)); // yellowish, dim
+      img.fillRect(paper, x1: 90, y1: 90, x2: 110, y2: 100, color: img.ColorRgb8(200, 20, 20));
+      final f = '${dir.path}/colour.png';
+      await File(f).writeAsBytes(img.encodePng(paper));
+
+      final out = img.decodeJpg((await processPage(PageJob(f, 0, ScanFilter.color))).bytes)!;
+      final bg = out.getPixel(10, 10);
+      expect(bg.r, greaterThan(225));
+      expect(bg.g, greaterThan(225));
+      expect(bg.b, greaterThan(225));
+      final red = out.getPixel(100, 95);
+      expect(red.r, greaterThan(red.g + 60));
+    });
+
+    test('maxSide shrinks the longest side', () async {
+      final r = await processPage(PageJob(path, 0, ScanFilter.original, maxSide: 20));
+      expect(r.width, 20);
+      expect(r.height, 10);
+    });
+
     test('grayscale filter removes colour', () async {
       final colour = img.Image(width: 10, height: 10);
       img.fill(colour, color: img.ColorRgb8(220, 30, 30));

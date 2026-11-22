@@ -5,6 +5,7 @@ import 'models.dart';
 import 'page_image.dart';
 import 'scan_actions.dart';
 import 'store.dart';
+import 'update_check.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key, required this.store});
@@ -19,6 +20,14 @@ class _HomePageState extends State<HomePage> {
   bool _searching = false;
   String _query = '';
   String? _folder;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) runUpdateCheck(context);
+    });
+  }
 
   bool _matches(Doc d) {
     final q = _query.trim().toLowerCase();
@@ -78,6 +87,11 @@ class _HomePageState extends State<HomePage> {
                 itemBuilder: (_) => [
                   for (final s in DocSort.values) PopupMenuItem(value: s, child: Text(s.label)),
                 ],
+              ),
+              IconButton(
+                tooltip: 'Cek update',
+                icon: const Icon(Icons.system_update),
+                onPressed: () => runUpdateCheck(context, manual: true),
               ),
               IconButton(
                 tooltip: 'Filter bawaan: ${store.defaultFilter.label}',

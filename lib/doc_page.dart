@@ -1,4 +1,7 @@
-﻿import 'package:material_ui/material_ui.dart';
+﻿
+
+import 'package:archive/archive_io.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'package:flutter/foundation.dart';
@@ -92,6 +95,71 @@ class _DocPageState extends State<DocPage> {
     }
   }
 
+  Future<void> _shareZip() async {
+    setState(() => _exporting = true);
+    try {
+      final tmp = await widget.store.exportFile('${doc.id}_gambar.zip');
+      if (await tmp.exists()) await tmp.delete();
+      final enc = ZipFileEncoder()..create(tmp.path);
+      for (var i = 0; i < doc.pages.length; i++) {
+        final r = await compute(processPage, PageJob.of(doc.pages[i], maxSide: 2400));
+        final f = await widget.store.exportFile('${doc.id}_p${i + 1}.jpg');
+        await f.writeAsBytes(r.bytes);
+        await enc.addFile(f, 'halaman_${(i + 1).toString().padLeft(2, '0')}.jpg');
+        await f.delete();
+      }
+      await enc.close();
+      await SharePlus.instance.share(ShareParams(files: [XFile(tmp.path)], subject: doc.name));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal membuat ZIP: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  Future<void> _editMeta() async {
+    final note = TextEditingController(text: doc.note ?? '');
+    final tags = TextEditingController(text: doc.tags.join(', '));
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Catatan & tag'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: tags,
+              decoration: const InputDecoration(labelText: 'Tag', hintText: 'pisahkan dengan koma'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: note,
+              minLines: 2,
+              maxLines: 5,
+              decoration: const InputDecoration(labelText: 'Catatan'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Simpan')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      doc.note = note.text.trim();
+      doc.tags
+        ..clear()
+        ..addAll(tags.text.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toSet());
+      await widget.store.save();
+      if (mounted) setState(() {});
+    }
+    note.dispose();
+    tags.dispose();
+  }
+
   Future<void> _filterAll() async {
     final f = await pickFilter(context, title: 'Terapkan ke semua halaman');
     if (f == null) return;
@@ -139,11 +207,15 @@ Future<void> _importFiles() async {    await importInto(context, widget.store, d
             onSelected: (v) => switch (v) {
               'img' => _shareImages(),
               'import' => _importFiles(),
+              'zip' => _shareZip(),
+              'meta' => _editMeta(),
               _ => _shareText(),
             },
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'import', child: Text('Impor gambar/PDF ke dokumen ini')),
+              PopupMenuItem(value: 'meta', child: Text('Catatan & tag')),
               PopupMenuItem(value: 'img', child: Text('Bagikan sebagai gambar')),
+              PopupMenuItem(value: 'zip', child: Text('Bagikan ZIP gambar')),
               PopupMenuItem(value: 'txt', child: Text('Bagikan teks (OCR)')),
             ],
           ),
@@ -164,6 +236,25 @@ Future<void> _importFiles() async {    await importInto(context, widget.store, d
       body: Column(
         children: [
           if (_exporting) const LinearProgressIndicator(),
+          if (doc.tags.isNotEmpty || (doc.note ?? '').isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (doc.tags.isNotEmpty)
+                      Wrap(spacing: 6, children: [for (final t in doc.tags) Chip(label: Text(t), visualDensity: VisualDensity.compact)]),
+                    if ((doc.note ?? '').isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(doc.note!, style: Theme.of(context).textTheme.bodySmall),
+                      ),
+                  ],
+                ),
+              ),
+            ),
           Expanded(
             child: ReorderableListView.builder(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 112),

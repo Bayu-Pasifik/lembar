@@ -1,6 +1,7 @@
 ﻿import 'dart:convert';
 import 'dart:io';
 
+import 'package:archive/archive_io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -20,6 +21,9 @@ class DocStore extends ChangeNotifier {
   String? signatureFile;
 
   DocSort sort = DocSort.newest;
+
+  /// Home screen shows thumbnails in a grid instead of a list.
+  bool grid = false;
 
   /// Documents in the chosen order. Pass [folder] to keep only that folder.
   List<Doc> visibleDocs({String? folder}) =>
@@ -50,10 +54,15 @@ class DocStore extends ChangeNotifier {
     await _root.create(recursive: true);
     _index = File('${_root.path}/docs.json');
     _settings = File('${_root.path}/settings.json');
+    await _readFiles();
+  }
+
+  Future<void> _readFiles() async {
     if (await _settings.exists()) {
       try {
         final m = jsonDecode(await _settings.readAsString()) as Map<String, dynamic>;
         sort = DocSort.values.firstWhere((s) => s.name == m['sort'], orElse: () => DocSort.newest);
+        grid = m['grid'] == true;
         final sig = m['signatureFile'] as String?;
         if (sig != null && await File(sig).exists()) signatureFile = sig;
         defaultFilter = ScanFilter.values.firstWhere(
@@ -149,6 +158,7 @@ class DocStore extends ChangeNotifier {
         'defaultFilter': defaultFilter.name,
         if (signatureFile != null) 'signatureFile': signatureFile,
         'sort': sort.name,
+        'grid': grid,
       }));
 
   /// Saves a newly drawn signature (transparent PNG) and makes it the current one.
@@ -250,10 +260,78 @@ class DocStore extends ChangeNotifier {
           signature: p.signature,
         ));
       }
+      for (final t in d.tags) {
+        if (!target.tags.contains(t)) target.tags.add(t);
+      }
+      if ((d.note ?? '').isNotEmpty) {
+        target.note = [if ((target.note ?? '').isNotEmpty) target.note!, d.note!].join('\n');
+      }
       d.deleted = DateTime.now();
     }
     await save();
     return target;
+  }
+
+  Future<void> setGrid(bool v) async {
+    grid = v;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  /// Zips the whole library (documents, images, signature, settings).
+  Future<File> createBackup() async {
+    await File('${_root.path}/root.txt').writeAsString(_root.path);
+    final tmp = await getTemporaryDirectory();
+    final t = DateTime.now();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final out = '${tmp.path}/lembar-backup-${t.year}${two(t.month)}${two(t.day)}-${two(t.hour)}${two(t.minute)}.zip';
+    final enc = ZipFileEncoder()..create(out);
+    await enc.addDirectory(_root, includeDirName: false);
+    await enc.close();
+    return File(out);
+  }
+
+  /// Replaces the library with the contents of a backup zip. Absolute paths
+  /// inside the backup are rewritten to this device's storage location.
+  /// Returns the number of documents restored.
+  Future<int> restoreBackup(String zipPath) async {
+    final tmp = await getTemporaryDirectory();
+    final work = Directory('${tmp.path}/restore_${DateTime.now().microsecondsSinceEpoch}');
+    await work.create(recursive: true);
+    try {
+      await extractFileToDisk(zipPath, work.path);
+      final idx = File('${work.path}/docs.json');
+      if (!await idx.exists()) throw const FormatException('Bukan berkas cadangan Lembar.');
+      jsonDecode(await idx.readAsString()); // must parse before we touch anything
+
+      final marker = File('${work.path}/root.txt');
+      final oldRoot = await marker.exists() ? (await marker.readAsString()).trim() : null;
+
+      // Clear the current library, then move the backup in.
+      await for (final e in _root.list()) {
+        await e.delete(recursive: true);
+      }
+      await for (final e in work.list()) {
+        final name = e.path.split(RegExp(r'[\\/]')).last;
+        if (name == 'root.txt') continue;
+        await e.rename('${_root.path}/$name');
+      }
+      if (oldRoot != null && oldRoot != _root.path) {
+        for (final f in [_index, _settings]) {
+          if (await f.exists()) {
+            await f.writeAsString((await f.readAsString()).replaceAll(oldRoot, _root.path));
+          }
+        }
+      }
+      signatureFile = null;
+      await _readFiles();
+      notifyListeners();
+      return docs.where((d) => d.deleted == null).length;
+    } finally {
+      try {
+        await work.delete(recursive: true);
+      } catch (_) {}
+    }
   }
 
   Future<File> exportFile(String fileName) async {

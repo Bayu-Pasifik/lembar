@@ -2,6 +2,7 @@
   original('Asli', 'Tanpa pemrosesan'),
   color('Warna', 'Hapus bayangan, warna tetap'),
   document('Dokumen', 'Hapus bayangan, hitam putih bersih'),
+  magic('Warna tajam', 'Bayangan hilang, warna lebih hidup'),
   grayscale('Abu-abu', 'Hanya diubah ke abu-abu');
 
   const ScanFilter(this.label, this.description);
@@ -102,8 +103,9 @@ class PageItem {
 }
 
 class Doc {
-  Doc({required this.id, required this.name, required this.created, this.folder, this.deleted, List<PageItem>? pages})
-      : pages = pages ?? [];
+  Doc({required this.id, required this.name, required this.created, this.folder, this.deleted, this.note, List<String>? tags, List<PageItem>? pages})
+      : tags = tags ?? [],
+        pages = pages ?? [];
 
   final String id;
   String name;
@@ -114,6 +116,10 @@ class Doc {
 
   /// Set when moved to the trash; null for live documents.
   DateTime? deleted;
+
+  /// Free-form note and short labels, both searchable.
+  String? note;
+  final List<String> tags;
   final List<PageItem> pages;
 
   Map<String, dynamic> toJson() => {
@@ -122,6 +128,8 @@ class Doc {
         'created': created.toIso8601String(),
         if (folder != null) 'folder': folder,
         if (deleted != null) 'deleted': deleted!.toIso8601String(),
+        if (note != null && note!.isNotEmpty) 'note': note,
+        if (tags.isNotEmpty) 'tags': tags,
         'pages': pages.map((p) => p.toJson()).toList(),
       };
 
@@ -131,6 +139,8 @@ class Doc {
         created: DateTime.parse(j['created'] as String),
         folder: j['folder'] as String?,
         deleted: j['deleted'] == null ? null : DateTime.parse(j['deleted'] as String),
+        note: j['note'] as String?,
+        tags: (j['tags'] as List?)?.cast<String>().toList(),
         pages: (j['pages'] as List)
             .map((p) => PageItem.fromJson(p as Map<String, dynamic>))
             .toList(),

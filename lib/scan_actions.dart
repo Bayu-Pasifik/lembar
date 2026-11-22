@@ -88,6 +88,7 @@ Future<String?> askName(BuildContext context, String initial) {
 Future<PdfOptions?> askPdfOptions(BuildContext context) {
   var paper = PdfPaper.fit;
   var quality = PdfQuality.high;
+  var searchable = false;
   return showModalBottomSheet<PdfOptions>(
     context: context,
     showDragHandle: true,
@@ -131,11 +132,19 @@ Future<PdfOptions?> askPdfOptions(BuildContext context) {
               ),
               const SizedBox(height: 4),
               Text(quality.description, style: Theme.of(ctx).textTheme.bodySmall),
-              const SizedBox(height: 16),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('PDF bisa dicari'),
+                subtitle: const Text('Tambah lapisan teks OCR tak terlihat. Pembuatan lebih lama.'),
+                value: searchable,
+                onChanged: (v) => setSheet(() => searchable = v),
+              ),
+              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: () => Navigator.pop(ctx, PdfOptions(paper: paper, quality: quality)),
+                  onPressed: () =>
+                      Navigator.pop(ctx, PdfOptions(paper: paper, quality: quality, searchable: searchable)),
                   child: const Text('Buat PDF'),
                 ),
               ),

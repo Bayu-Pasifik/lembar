@@ -1,4 +1,6 @@
-﻿import 'package:material_ui/material_ui.dart';
+﻿import 'package:file_picker/file_picker.dart';
+import 'package:material_ui/material_ui.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'doc_page.dart';
 import 'models.dart';
@@ -48,6 +50,44 @@ class _HomePageState extends State<HomePage> {
     ));
   }
 
+  Future<void> _backup() async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(content: Text('Membuat cadangan…')));
+    try {
+      final f = await store.createBackup();
+      messenger.hideCurrentSnackBar();
+      await SharePlus.instance.share(ShareParams(files: [XFile(f.path)], subject: 'Cadangan Lembar'));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Gagal mencadangkan: $e')));
+    }
+  }
+
+  Future<void> _restore() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final picked = await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: const ['zip']);
+    if (picked.isEmpty || !mounted) return;
+    final path = picked.first.path;
+    if (path == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Pulihkan cadangan?'),
+        content: const Text('Semua dokumen saat ini diganti dengan isi cadangan.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Pulihkan')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      final n = await store.restoreBackup(path);
+      messenger.showSnackBar(SnackBar(content: Text('$n dokumen dipulihkan')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Gagal memulihkan: $e')));
+    }
+  }
+
   Future<void> _moveSelected() async {
     final f = await askFolder(context, store, null);
     if (f == null) return;
@@ -87,6 +127,8 @@ class _HomePageState extends State<HomePage> {
     final q = _query.trim().toLowerCase();
     if (q.isEmpty) return true;
     if (d.name.toLowerCase().contains(q)) return true;
+    if ((d.note ?? '').toLowerCase().contains(q)) return true;
+    if (d.tags.any((t) => t.toLowerCase().contains(q))) return true;
     return d.pages.any((p) => (p.text ?? '').toLowerCase().contains(q));
   }
 
@@ -178,13 +220,23 @@ class _HomePageState extends State<HomePage> {
               PopupMenuButton<String>(
                 tooltip: 'Lainnya',
                 onSelected: (v) {
-                  if (v == 'trash') {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => TrashPage(store: store)));
-                  } else {
-                    runUpdateCheck(context, manual: true);
+                  switch (v) {
+                    case 'trash':
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => TrashPage(store: store)));
+                    case 'grid':
+                      store.setGrid(!store.grid);
+                    case 'backup':
+                      _backup();
+                    case 'restore':
+                      _restore();
+                    default:
+                      runUpdateCheck(context, manual: true);
                   }
                 },
                 itemBuilder: (_) => [
+                  PopupMenuItem(value: 'grid', child: Text(store.grid ? 'Tampilan daftar' : 'Tampilan kisi')),
+                  const PopupMenuItem(value: 'backup', child: Text('Cadangkan semua dokumen')),
+                  const PopupMenuItem(value: 'restore', child: Text('Pulihkan dari cadangan')),
                   PopupMenuItem(
                     value: 'trash',
                     child: Text(store.trash.isEmpty ? 'Sampah' : 'Sampah (${store.trash.length})'),
@@ -241,6 +293,23 @@ class _HomePageState extends State<HomePage> {
                     ? (_query.trim().isEmpty && folder == null
                         ? const _Empty()
                         : const Center(child: Text('Tidak ada dokumen cocok')))
+                    : store.grid
+                    ? GridView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 160),
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 12,
+                          crossAxisSpacing: 12,
+                          childAspectRatio: 0.78,
+                        ),
+                        itemCount: docs.length,
+                        itemBuilder: (context, i) => _DocGridTile(
+                          doc: docs[i],
+                          selected: _selected.contains(docs[i]),
+                          onLongPress: () => _toggle(docs[i]),
+                          onTap: () => _selecting ? _toggle(docs[i]) : _open(context, docs[i]),
+                        ),
+                      )
                     : ListView.separated(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 160),
                         itemCount: docs.length,
@@ -305,6 +374,61 @@ class _HomePageState extends State<HomePage> {
       ),
     );
     if (ok == true) await store.delete(doc);
+  }
+}
+
+class _DocGridTile extends StatelessWidget {
+  const _DocGridTile({required this.doc, required this.selected, required this.onTap, required this.onLongPress});
+  final Doc doc;
+  final bool selected;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context);
+    final first = doc.pages.isEmpty ? null : doc.pages.first;
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      margin: EdgeInsets.zero,
+      color: selected ? t.colorScheme.secondaryContainer : null,
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  first == null
+                      ? ColoredBox(color: t.colorScheme.surfaceContainerHighest)
+                      : PageImage(page: first, maxSide: 480, fit: BoxFit.cover, thumbnail: true),
+                  if (selected)
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: Icon(Icons.check_circle, color: t.colorScheme.primary),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(doc.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.textTheme.titleSmall),
+                  Text('${doc.pages.length} halaman',
+                      style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

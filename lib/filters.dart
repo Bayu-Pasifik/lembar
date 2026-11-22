@@ -77,6 +77,8 @@ Future<PageResult> processPage(PageJob job) async {
       image = flattenIllumination(image, gray: false);
     case ScanFilter.document:
       image = flattenIllumination(image, gray: true);
+    case ScanFilter.magic:
+      image = boostColor(flattenIllumination(image, gray: false));
   }
 
   if (job.brightness != 0 || job.contrast != 1) {
@@ -95,6 +97,28 @@ Future<PageResult> processPage(PageJob job) async {
     Uint8List.fromList(img.encodeJpg(image, quality: job.quality)),
     image.width,
     image.height,
+  );
+}
+
+/// Pushes colours away from their gray value (saturation x1.45) and adds a
+/// little contrast, so ink and highlights look vivid on a white page.
+img.Image boostColor(img.Image src) {
+  final rgb = src.convert(format: img.Format.uint8, numChannels: 3);
+  final px = rgb.getBytes(order: img.ChannelOrder.rgb);
+  const sat = 1.45;
+  for (var i = 0; i < px.length; i += 3) {
+    final g = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+    for (var c = 0; c < 3; c++) {
+      final v = g + (px[i + c] - g) * sat;
+      px[i + c] = (((v - 128) * 1.08) + 128).round().clamp(0, 255);
+    }
+  }
+  return img.Image.fromBytes(
+    width: rgb.width,
+    height: rgb.height,
+    bytes: px.buffer,
+    numChannels: 3,
+    order: img.ChannelOrder.rgb,
   );
 }
 

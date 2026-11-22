@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 
 import 'filters.dart';
 import 'models.dart';
+import 'ocr.dart';
 import 'store.dart';
 
 enum PdfPaper {
@@ -33,8 +34,11 @@ enum PdfQuality {
 }
 
 class PdfOptions {
-  const PdfOptions({this.paper = PdfPaper.fit, this.quality = PdfQuality.high});
+  const PdfOptions({this.paper = PdfPaper.fit, this.quality = PdfQuality.high, this.searchable = false});
   final PdfPaper paper;
+
+  /// Adds an invisible OCR text layer so the PDF can be searched and selected.
+  final bool searchable;
   final PdfQuality quality;
 }
 
@@ -54,22 +58,50 @@ Future<File> buildPdf(
     final image = pw.MemoryImage(r.bytes);
     final base = options.paper.format;
     final PdfPageFormat format;
-    final pw.Widget child;
     if (base == null) {
       const width = 595.28; // A4 width in points
       format = PdfPageFormat(width, width * r.height / r.width);
-      child = pw.Image(image, fit: pw.BoxFit.fill);
     } else {
       // Pick the orientation that matches the photo, then fit it inside the sheet.
       format = r.width > r.height ? base.landscape : base;
-      child = pw.Container(
-        width: double.infinity,
-        height: double.infinity,
-        color: PdfColors.white,
-        alignment: pw.Alignment.center,
-        child: pw.Image(image, fit: pw.BoxFit.contain),
-      );
     }
+    // Where the photo lands on the sheet (points): filled, or contained and centred.
+    final scale = base == null
+        ? format.width / r.width
+        : (format.width / r.width < format.height / r.height ? format.width / r.width : format.height / r.height);
+    final iw = r.width * scale;
+    final ih = r.height * scale;
+    final ox = (format.width - iw) / 2;
+    final oy = (format.height - ih) / 2;
+
+    var lines = const <OcrLine>[];
+    if (options.searchable) {
+      try {
+        lines = await recognizeLines(r.bytes, r.width, r.height, store);
+      } catch (_) {
+        // A page whose OCR fails is still exported, just not searchable.
+      }
+    }
+    final pw.Widget child = pw.Container(
+      width: format.width,
+      height: format.height,
+      color: PdfColors.white,
+      child: pw.Stack(
+        children: [
+          pw.Positioned(left: ox, top: oy, child: pw.Image(image, width: iw, height: ih, fit: pw.BoxFit.fill)),
+          for (final l in lines)
+            if (_latin(l.text).trim().isNotEmpty)
+              pw.Positioned(
+                left: ox + l.left * iw,
+                top: oy + l.top * ih,
+                child: pw.Text(
+                  _latin(l.text),
+                  style: pw.TextStyle(fontSize: (l.height * ih * 0.8).clamp(4.0, 72.0), renderingMode: PdfTextRenderingMode.invisible),
+                ),
+              ),
+        ],
+      ),
+    );
     pdf.addPage(pw.Page(pageFormat: format, margin: pw.EdgeInsets.zero, build: (_) => child));
     onProgress?.call((i + 1) / doc.pages.length);
   }
@@ -78,3 +110,6 @@ Future<File> buildPdf(
   await file.writeAsBytes(await pdf.save());
   return file;
 }
+
+/// The built-in PDF font only covers Latin-1; drop anything else so it does not throw.
+String _latin(String s) => String.fromCharCodes(s.runes.where((c) => c >= 32 && c < 256));

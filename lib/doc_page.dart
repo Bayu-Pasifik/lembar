@@ -1,9 +1,8 @@
-﻿import 'dart:io';
-
-import 'package:material_ui/material_ui.dart';
+﻿import 'package:material_ui/material_ui.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'models.dart';
+import 'page_image.dart';
 import 'page_viewer.dart';
 import 'pdf_export.dart';
 import 'scan_actions.dart';
@@ -37,6 +36,17 @@ class _DocPageState extends State<DocPage> {
     }
   }
 
+  Future<void> _filterAll() async {
+    final f = await pickFilter(context, title: 'Terapkan ke semua halaman');
+    if (f == null) return;
+    await widget.store.applyFilterToAll(doc, f);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Filter ${f.label} diterapkan ke ${doc.pages.length} halaman')),
+    );
+  }
+
   Future<void> _addPages() async {
     await scanInto(context, widget.store, doc: doc);
     if (mounted) setState(() {});
@@ -62,6 +72,11 @@ class _DocPageState extends State<DocPage> {
       appBar: AppBar(
         title: Text(doc.name, overflow: TextOverflow.ellipsis),
         actions: [
+          IconButton(
+            tooltip: 'Filter semua halaman',
+            icon: const Icon(Icons.auto_fix_high),
+            onPressed: doc.pages.isEmpty ? null : _filterAll,
+          ),
           IconButton(
             tooltip: 'Ubah nama',
             icon: const Icon(Icons.edit_outlined),
@@ -102,10 +117,7 @@ class _DocPageState extends State<DocPage> {
                           SizedBox(
                             width: 64,
                             height: 84,
-                            child: RotatedBox(
-                              quarterTurns: p.turns,
-                              child: Image.file(File(p.file), fit: BoxFit.contain, cacheWidth: 240),
-                            ),
+                            child: PageImage(page: p, maxSide: 240, thumbnail: true),
                           ),
                           const SizedBox(width: 14),
                           Expanded(

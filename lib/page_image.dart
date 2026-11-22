@@ -7,9 +7,19 @@ import 'models.dart';
 /// Shows a page with rotation and filter applied, using the same pipeline as the
 /// PDF export so the preview matches the result. Results are cached in memory.
 class PageImage extends StatefulWidget {
-  const PageImage({super.key, required this.page, this.maxSide = 1600});
+  const PageImage({
+    super.key,
+    required this.page,
+    this.maxSide = 1600,
+    this.fit = BoxFit.contain,
+    this.thumbnail = false,
+  });
   final PageItem page;
   final int maxSide;
+  final BoxFit fit;
+
+  /// Thumbnails stay quiet: no spinner, no error text.
+  final bool thumbnail;
 
   @override
   State<PageImage> createState() => _PageImageState();
@@ -17,7 +27,7 @@ class PageImage extends StatefulWidget {
 
 class _PageImageState extends State<PageImage> {
   static final Map<String, Uint8List> _cache = {};
-  static const _cacheLimit = 24;
+  static const _cacheLimit = 64;
 
   Uint8List? _bytes;
   Object? _error;
@@ -76,13 +86,15 @@ class _PageImageState extends State<PageImage> {
   @override
   Widget build(BuildContext context) {
     if (_error != null) {
-      return Center(child: Text('Gagal memuat: $_error', style: const TextStyle(color: Colors.white70)));
+      return widget.thumbnail
+          ? const Center(child: Icon(Icons.broken_image_outlined))
+          : Center(child: Text('Gagal memuat: $_error', style: const TextStyle(color: Colors.white70)));
     }
     return Stack(
       fit: StackFit.expand,
       children: [
-        if (_bytes != null) Image.memory(_bytes!, fit: BoxFit.contain, gaplessPlayback: true),
-        if (_loading)
+        if (_bytes != null) Image.memory(_bytes!, fit: widget.fit, gaplessPlayback: true),
+        if (_loading && !widget.thumbnail)
           const Align(
             alignment: Alignment.topCenter,
             child: Padding(

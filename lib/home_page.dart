@@ -1,9 +1,8 @@
-﻿import 'dart:io';
-
-import 'package:material_ui/material_ui.dart';
+﻿import 'package:material_ui/material_ui.dart';
 
 import 'doc_page.dart';
 import 'models.dart';
+import 'page_image.dart';
 import 'scan_actions.dart';
 import 'store.dart';
 
@@ -27,7 +26,23 @@ class HomePage extends StatelessWidget {
       builder: (context, _) {
         final docs = store.docs;
         return Scaffold(
-          appBar: AppBar(title: const Text('Lembar')),
+          appBar: AppBar(
+            title: const Text('Lembar'),
+            actions: [
+              IconButton(
+                tooltip: 'Filter bawaan: ${store.defaultFilter.label}',
+                icon: const Icon(Icons.tune),
+                onPressed: () async {
+                  final f = await pickFilter(
+                    context,
+                    title: 'Filter bawaan halaman baru',
+                    current: store.defaultFilter,
+                  );
+                  if (f != null) await store.setDefaultFilter(f);
+                },
+              ),
+            ],
+          ),
           body: docs.isEmpty
               ? const _Empty()
               : ListView.separated(
@@ -128,7 +143,7 @@ class _DocTile extends StatelessWidget {
                   height: 72,
                   child: first == null
                       ? ColoredBox(color: t.colorScheme.surfaceContainerHighest)
-                      : Image.file(File(first.file), fit: BoxFit.cover, cacheWidth: 200),
+                      : PageImage(page: first, maxSide: 240, fit: BoxFit.cover, thumbnail: true),
                 ),
               ),
               const SizedBox(width: 14),

@@ -9,13 +9,29 @@ import 'models.dart';
 class DocStore extends ChangeNotifier {
   late final Directory _root;
   late final File _index;
+  late final File _settings;
   final List<Doc> docs = [];
+
+  /// Filter given to newly scanned pages.
+  ScanFilter defaultFilter = ScanFilter.document;
 
   Future<void> load() async {
     final base = await getApplicationDocumentsDirectory();
     _root = Directory('${base.path}/lembar');
     await _root.create(recursive: true);
     _index = File('${_root.path}/docs.json');
+    _settings = File('${_root.path}/settings.json');
+    if (await _settings.exists()) {
+      try {
+        final m = jsonDecode(await _settings.readAsString()) as Map<String, dynamic>;
+        defaultFilter = ScanFilter.values.firstWhere(
+          (f) => f.name == m['defaultFilter'],
+          orElse: () => ScanFilter.document,
+        );
+      } catch (_) {
+        // Keep the built-in default.
+      }
+    }
     if (await _index.exists()) {
       try {
         final list = jsonDecode(await _index.readAsString()) as List;
@@ -53,7 +69,20 @@ class DocStore extends ChangeNotifier {
       final name = '${DateTime.now().microsecondsSinceEpoch}.jpg';
       final dest = '${dir.path}/$name';
       await File(src).copy(dest);
-      doc.pages.add(PageItem(file: dest));
+      doc.pages.add(PageItem(file: dest, filter: defaultFilter));
+    }
+    await save();
+  }
+
+  Future<void> setDefaultFilter(ScanFilter f) async {
+    defaultFilter = f;
+    await _settings.writeAsString(jsonEncode({'defaultFilter': f.name}));
+    notifyListeners();
+  }
+
+  Future<void> applyFilterToAll(Doc doc, ScanFilter f) async {
+    for (final p in doc.pages) {
+      p.filter = f;
     }
     await save();
   }

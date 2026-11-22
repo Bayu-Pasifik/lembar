@@ -1,11 +1,12 @@
 ﻿enum ScanFilter {
-  original('Asli'),
-  color('Warna'),
-  document('Dokumen'),
-  grayscale('Abu-abu');
+  original('Asli', 'Tanpa pemrosesan'),
+  color('Warna', 'Hapus bayangan, warna tetap'),
+  document('Dokumen', 'Hapus bayangan, hitam putih bersih'),
+  grayscale('Abu-abu', 'Hanya diubah ke abu-abu');
 
-  const ScanFilter(this.label);
+  const ScanFilter(this.label, this.description);
   final String label;
+  final String description;
 }
 
 class PageItem {

@@ -33,6 +33,34 @@ Future<Doc?> scanInto(BuildContext context, DocStore store, {Doc? doc}) async {
   }
 }
 
+/// Bottom sheet listing the filters; resolves to the chosen one (null if dismissed).
+Future<ScanFilter?> pickFilter(BuildContext context, {required String title, ScanFilter? current}) {
+  return showModalBottomSheet<ScanFilter>(
+    context: context,
+    showDragHandle: true,
+    builder: (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+            child: Text(title, style: Theme.of(ctx).textTheme.titleMedium),
+          ),
+          for (final f in ScanFilter.values)
+            ListTile(
+              title: Text(f.label),
+              subtitle: Text(f.description),
+              trailing: f == current ? const Icon(Icons.check) : null,
+              onTap: () => Navigator.pop(ctx, f),
+            ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    ),
+  );
+}
+
 Future<String?> askName(BuildContext context, String initial) {
   final c = TextEditingController(text: initial);
   return showDialog<String>(

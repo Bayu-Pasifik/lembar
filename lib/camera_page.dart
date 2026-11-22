@@ -25,6 +25,9 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
   bool _busy = false;
   bool _flash = false;
 
+  /// Batch mode: shots are cropped automatically so shooting never pauses.
+  bool _batch = false;
+
   /// ID card mode: two shots (front, back) become one page.
   bool _idMode = false;
   String? _idFront;
@@ -80,7 +83,22 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  /// Batch mode: crop with the detected paper edges, no editor. The crop can
+  /// still be adjusted later from the page viewer.
+  Future<void> _autoCrop(String path) async {
+    final prep = await compute(prepareForCrop, path);
+    final bytes = await compute(cropQuad, CropJob(path, prep.guess));
+    final tmp = await getTemporaryDirectory();
+    final f = File('${tmp.path}/crop_${DateTime.now().microsecondsSinceEpoch}.jpg');
+    await f.writeAsBytes(bytes);
+    if (mounted) setState(() => _shots.add(ScanShot(f.path, original: path, quad: prep.guess)));
+  }
+
   Future<void> _crop(String path) async {
+    if (_batch && !_idMode) {
+      await _autoCrop(path);
+      return;
+    }
     final out = await Navigator.push<CropResult>(
       context,
       MaterialPageRoute(builder: (_) => CropPage(file: path)),
@@ -192,20 +210,32 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
                           Positioned(
                             left: 12,
                             top: 12,
-                            child: FilterChip(
-                              avatar: const Icon(Icons.badge_outlined, size: 18),
-                              label: Text(
-                                !_idMode
-                                    ? 'Kartu ID'
-                                    : _idFront == null
-                                        ? 'Kartu ID · jepret sisi depan'
-                                        : 'Kartu ID · jepret sisi belakang',
-                              ),
-                              selected: _idMode,
-                              onSelected: (v) => setState(() {
-                                _idMode = v;
-                                _idFront = null;
-                              }),
+                            child: Wrap(
+                              spacing: 8,
+                              children: [
+                                FilterChip(
+                                  avatar: const Icon(Icons.badge_outlined, size: 18),
+                                  label: Text(
+                                    !_idMode
+                                        ? 'Kartu ID'
+                                        : _idFront == null
+                                            ? 'Kartu ID · jepret sisi depan'
+                                            : 'Kartu ID · jepret sisi belakang',
+                                  ),
+                                  selected: _idMode,
+                                  onSelected: (v) => setState(() {
+                                    _idMode = v;
+                                    _idFront = null;
+                                  }),
+                                ),
+                                if (!_idMode)
+                                  FilterChip(
+                                    avatar: const Icon(Icons.burst_mode_outlined, size: 18),
+                                    label: const Text('Batch'),
+                                    selected: _batch,
+                                    onSelected: (v) => setState(() => _batch = v),
+                                  ),
+                              ],
                             ),
                           ),
                         ],

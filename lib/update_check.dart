@@ -44,13 +44,18 @@ Future<UpdateInfo?> checkForUpdate() async {
     final json = jsonDecode(await res.transform(utf8.decoder).join()) as Map<String, dynamic>;
     final tag = (json['tag_name'] as String?) ?? '';
     if (!isNewer(tag, current)) return null;
+    // Releases ship one APK per ABI. Nearly every current phone is arm64-v8a,
+    // so prefer that and fall back to the first APK listed.
     String? apk;
     for (final a in (json['assets'] as List? ?? const [])) {
-      final name = (a['name'] as String?) ?? '';
-      if (name.toLowerCase().endsWith('.apk')) {
-        apk = a['browser_download_url'] as String?;
+      final name = ((a['name'] as String?) ?? '').toLowerCase();
+      if (!name.endsWith('.apk')) continue;
+      final url = a['browser_download_url'] as String?;
+      if (name.contains('arm64')) {
+        apk = url;
         break;
       }
+      apk ??= url;
     }
     return UpdateInfo(
       version: tag,

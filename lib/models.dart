@@ -102,7 +102,7 @@ class PageItem {
 }
 
 class Doc {
-  Doc({required this.id, required this.name, required this.created, this.folder, List<PageItem>? pages})
+  Doc({required this.id, required this.name, required this.created, this.folder, this.deleted, List<PageItem>? pages})
       : pages = pages ?? [];
 
   final String id;
@@ -111,6 +111,9 @@ class Doc {
   /// Optional folder label used to group documents on the home screen.
   String? folder;
   final DateTime created;
+
+  /// Set when moved to the trash; null for live documents.
+  DateTime? deleted;
   final List<PageItem> pages;
 
   Map<String, dynamic> toJson() => {
@@ -118,6 +121,7 @@ class Doc {
         'name': name,
         'created': created.toIso8601String(),
         if (folder != null) 'folder': folder,
+        if (deleted != null) 'deleted': deleted!.toIso8601String(),
         'pages': pages.map((p) => p.toJson()).toList(),
       };
 
@@ -126,6 +130,7 @@ class Doc {
         name: j['name'] as String,
         created: DateTime.parse(j['created'] as String),
         folder: j['folder'] as String?,
+        deleted: j['deleted'] == null ? null : DateTime.parse(j['deleted'] as String),
         pages: (j['pages'] as List)
             .map((p) => PageItem.fromJson(p as Map<String, dynamic>))
             .toList(),

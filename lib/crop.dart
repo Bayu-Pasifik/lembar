@@ -54,10 +54,215 @@ Future<CropInput> prepareForCrop(String file) async {
   );
 }
 
-/// Cheap paper finder: on a small grayscale copy, take the bounding box of the
-/// bright pixels (Otsu threshold). Falls back to an inset rectangle when the
-/// result looks implausible. The user can always drag the corners.
+/// Finds the paper in [source]: segments a small copy by brightness and by
+/// colour distance from the photo's border, keeps the largest blob, and takes
+/// its four extreme points as corners, so tilted and skewed sheets work, not
+/// just upright ones. Falls back to a bounding-box guess, then an inset
+/// rectangle. The user can always drag the corners.
 Quad guessPaper(img.Image source) {
+  const side = 200;
+  final small = source.width >= source.height
+      ? img.copyResize(source, width: side)
+      : img.copyResize(source, height: side);
+  final blurred = img.gaussianBlur(small, radius: 2);
+  final w = blurred.width, h = blurred.height;
+
+  final gray = Uint8List(w * h);
+  final dist = Uint8List(w * h);
+  // Background colour estimate: per-channel median of a thin border ring.
+  final rs = <int>[], gs = <int>[], bs = <int>[];
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      final p = blurred.getPixel(x, y);
+      if (x < 4 || y < 4 || x >= w - 4 || y >= h - 4) {
+        rs.add(p.r.toInt());
+        gs.add(p.g.toInt());
+        bs.add(p.b.toInt());
+      }
+    }
+  }
+  int median(List<int> v) => (v..sort())[v.length ~/ 2];
+  final br = median(rs), bg = median(gs), bb = median(bs);
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      final p = blurred.getPixel(x, y);
+      final r = p.r.toInt(), g = p.g.toInt(), b = p.b.toInt();
+      gray[y * w + x] = ((r * 299 + g * 587 + b * 114) / 1000).round();
+      dist[y * w + x] = ((r - br).abs() + (g - bg).abs() + (b - bb).abs()) ~/ 3;
+    }
+  }
+
+  Quad? best;
+  var bestScore = 0.0;
+  for (final values in [gray, dist]) {
+    final thr = _otsu(values);
+    final mask = Uint8List(w * h);
+    for (var i = 0; i < mask.length; i++) {
+      mask[i] = values[i] > thr ? 1 : 0;
+    }
+    final c = _quadFromMask(mask, w, h);
+    if (c != null && c.score > bestScore) {
+      bestScore = c.score;
+      best = c.quad;
+    }
+  }
+  return best ?? _bboxGuess(source);
+}
+
+int _otsu(Uint8List values) {
+  final hist = List<int>.filled(256, 0);
+  for (final v in values) {
+    hist[v]++;
+  }
+  final total = values.length;
+  var sumAll = 0.0;
+  for (var i = 0; i < 256; i++) {
+    sumAll += i * hist[i];
+  }
+  var sumB = 0.0, wB = 0, bestVar = 0.0, thr = 128;
+  for (var t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (wB == 0) continue;
+    final wF = total - wB;
+    if (wF == 0) break;
+    sumB += t * hist[t];
+    final mB = sumB / wB, mF = (sumAll - sumB) / wF;
+    final between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > bestVar) {
+      bestVar = between;
+      thr = t;
+    }
+  }
+  return thr;
+}
+
+class _Candidate {
+  const _Candidate(this.quad, this.score);
+  final Quad quad;
+  final double score;
+}
+
+/// Largest blob of [mask] (holes filled), turned into a quad, with a score of
+/// how rectangular it is. Null when the blob is implausible as a sheet of paper.
+_Candidate? _quadFromMask(Uint8List mask, int w, int h) {
+  // Largest 4-connected component.
+  final label = Int32List(w * h);
+  var bestLabel = 0, bestSize = 0, next = 0;
+  final stack = <int>[];
+  for (var i = 0; i < mask.length; i++) {
+    if (mask[i] == 0 || label[i] != 0) continue;
+    next++;
+    var size = 0;
+    stack.add(i);
+    label[i] = next;
+    while (stack.isNotEmpty) {
+      final j = stack.removeLast();
+      size++;
+      final x = j % w, y = j ~/ w;
+      if (x > 0 && mask[j - 1] == 1 && label[j - 1] == 0) {
+        label[j - 1] = next;
+        stack.add(j - 1);
+      }
+      if (x < w - 1 && mask[j + 1] == 1 && label[j + 1] == 0) {
+        label[j + 1] = next;
+        stack.add(j + 1);
+      }
+      if (y > 0 && mask[j - w] == 1 && label[j - w] == 0) {
+        label[j - w] = next;
+        stack.add(j - w);
+      }
+      if (y < h - 1 && mask[j + w] == 1 && label[j + w] == 0) {
+        label[j + w] = next;
+        stack.add(j + w);
+      }
+    }
+    if (size > bestSize) {
+      bestSize = size;
+      bestLabel = next;
+    }
+  }
+  if (bestLabel == 0 || bestSize < w * h * 0.12) return null;
+
+  // Fill holes (text, shadows): whatever the outside can't reach is inside.
+  final outside = Uint8List(w * h);
+  bool open(int i) => label[i] != bestLabel && outside[i] == 0;
+  void seed(int i) {
+    if (open(i)) {
+      outside[i] = 1;
+      stack.add(i);
+    }
+  }
+
+  for (var x = 0; x < w; x++) {
+    seed(x);
+    seed((h - 1) * w + x);
+  }
+  for (var y = 0; y < h; y++) {
+    seed(y * w);
+    seed(y * w + w - 1);
+  }
+  while (stack.isNotEmpty) {
+    final j = stack.removeLast();
+    final x = j % w, y = j ~/ w;
+    if (x > 0) seed(j - 1);
+    if (x < w - 1) seed(j + 1);
+    if (y > 0) seed(j - w);
+    if (y < h - 1) seed(j + w);
+  }
+
+  // Extreme points along the two diagonals give the four corners.
+  var area = 0;
+  var tl = 1 << 30, brr = -(1 << 30), tr = -(1 << 30), bl = 1 << 30;
+  var tlP = (0, 0), brP = (0, 0), trP = (0, 0), blP = (0, 0);
+  for (var y = 0; y < h; y++) {
+    for (var x = 0; x < w; x++) {
+      if (outside[y * w + x] == 1) continue;
+      area++;
+      if (x + y < tl) {
+        tl = x + y;
+        tlP = (x, y);
+      }
+      if (x + y > brr) {
+        brr = x + y;
+        brP = (x + 1, y + 1);
+      }
+      if (x - y > tr) {
+        tr = x - y;
+        trP = (x + 1, y);
+      }
+      if (x - y < bl) {
+        bl = x - y;
+        blP = (x, y + 1);
+      }
+    }
+  }
+  final quad = Quad(
+    (tlP.$1 / w, tlP.$2 / h),
+    (trP.$1 / w, trP.$2 / h),
+    (brP.$1 / w, brP.$2 / h),
+    (blP.$1 / w, blP.$2 / h),
+  );
+  final qa = _area(quad, w, h);
+  final frac = qa / (w * h);
+  if (qa <= 0 || frac < 0.12 || frac > 0.97) return null;
+  final fill = area / qa; // 1.0 = blob is a perfect quad
+  if (fill < 0.8) return null;
+  return _Candidate(quad, fill);
+}
+
+double _area(Quad q, int w, int h) {
+  final p = q.points;
+  var s = 0.0;
+  for (var i = 0; i < 4; i++) {
+    final a = p[i], b = p[(i + 1) % 4];
+    s += a.$1 * w * b.$2 * h - b.$1 * w * a.$2 * h;
+  }
+  return s.abs() / 2;
+}
+
+/// Fallback finder: bounding box of the bright pixels (Otsu threshold), or an
+/// inset rectangle when the result looks implausible.
+Quad _bboxGuess(img.Image source) {
   const side = 160;
   final small = source.width >= source.height
       ? img.copyResize(source, width: side)

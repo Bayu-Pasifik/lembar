@@ -20,6 +20,60 @@ class _HomePageState extends State<HomePage> {
   bool _searching = false;
   String _query = '';
   String? _folder;
+  final Set<Doc> _selected = {};
+
+  bool get _selecting => _selected.isNotEmpty;
+
+  void _toggle(Doc d) => setState(() {
+        if (!_selected.remove(d)) _selected.add(d);
+      });
+
+  Future<void> _deleteSelected() async {
+    final list = _selected.toList();
+    setState(_selected.clear);
+    for (final d in list) {
+      await store.delete(d);
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('${list.length} dokumen dipindah ke sampah'),
+      action: SnackBarAction(
+        label: 'Urungkan',
+        onPressed: () async {
+          for (final d in list) {
+            await store.restore(d);
+          }
+        },
+      ),
+    ));
+  }
+
+  Future<void> _moveSelected() async {
+    final f = await askFolder(context, store, null);
+    if (f == null) return;
+    await store.setFolderAll(_selected, f);
+    if (mounted) setState(_selected.clear);
+  }
+
+  Future<void> _mergeSelected() async {
+    // Oldest first, so pages keep their natural order.
+    final list = _selected.toList()..sort((a, b) => a.created.compareTo(b.created));
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Gabungkan dokumen?'),
+        content: Text('${list.length} dokumen digabung ke "${list.first.name}". Sisanya masuk sampah.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Gabungkan')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(_selected.clear);
+    final doc = await store.merge(list);
+    if (mounted) _open(context, doc);
+  }
 
   @override
   void initState() {
@@ -58,8 +112,41 @@ class _HomePageState extends State<HomePage> {
         // A folder that no longer exists (renamed or emptied) falls back to "Semua".
         final folder = store.folders.contains(_folder) ? _folder : null;
         final docs = store.visibleDocs(folder: folder).where(_matches).toList();
+        _selected.removeWhere((d) => d.deleted != null || !store.docs.contains(d));
         return Scaffold(
-          appBar: AppBar(
+          appBar: _selecting
+              ? AppBar(
+                  leading: IconButton(
+                    tooltip: 'Batal pilih',
+                    icon: const Icon(Icons.close),
+                    onPressed: () => setState(_selected.clear),
+                  ),
+                  title: Text('${_selected.length} dipilih'),
+                  actions: [
+                    IconButton(
+                      tooltip: 'Pilih semua',
+                      icon: const Icon(Icons.select_all),
+                      onPressed: () => setState(() => _selected.addAll(docs)),
+                    ),
+                    IconButton(
+                      tooltip: 'Pindahkan ke folder',
+                      icon: const Icon(Icons.folder_outlined),
+                      onPressed: _moveSelected,
+                    ),
+                    if (_selected.length > 1)
+                      IconButton(
+                        tooltip: 'Gabungkan',
+                        icon: const Icon(Icons.merge_type),
+                        onPressed: _mergeSelected,
+                      ),
+                    IconButton(
+                      tooltip: 'Hapus',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: _deleteSelected,
+                    ),
+                  ],
+                )
+              : AppBar(
             title: _searching
                 ? TextField(
                     autofocus: true,
@@ -88,10 +175,22 @@ class _HomePageState extends State<HomePage> {
                   for (final s in DocSort.values) PopupMenuItem(value: s, child: Text(s.label)),
                 ],
               ),
-              IconButton(
-                tooltip: 'Cek update',
-                icon: const Icon(Icons.system_update),
-                onPressed: () => runUpdateCheck(context, manual: true),
+              PopupMenuButton<String>(
+                tooltip: 'Lainnya',
+                onSelected: (v) {
+                  if (v == 'trash') {
+                    Navigator.push(context, MaterialPageRoute(builder: (_) => TrashPage(store: store)));
+                  } else {
+                    runUpdateCheck(context, manual: true);
+                  }
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'trash',
+                    child: Text(store.trash.isEmpty ? 'Sampah' : 'Sampah (${store.trash.length})'),
+                  ),
+                  const PopupMenuItem(value: 'update', child: Text('Cek update')),
+                ],
               ),
               IconButton(
                 tooltip: 'Filter bawaan: ${store.defaultFilter.label}',
@@ -148,7 +247,10 @@ class _HomePageState extends State<HomePage> {
                         separatorBuilder: (_, _) => const SizedBox(height: 8),
                         itemBuilder: (context, i) => _DocTile(
                           doc: docs[i],
-                          onTap: () => _open(context, docs[i]),
+                          selecting: _selecting,
+                          selected: _selected.contains(docs[i]),
+                          onLongPress: () => _toggle(docs[i]),
+                          onTap: () => _selecting ? _toggle(docs[i]) : _open(context, docs[i]),
                           onRename: () async {
                             final n = await askName(context, docs[i].name);
                             if (n != null) {
@@ -206,6 +308,73 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
+class TrashPage extends StatelessWidget {
+  const TrashPage({super.key, required this.store});
+  final DocStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) {
+        final items = store.trash;
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Sampah'),
+            actions: [
+              if (items.isNotEmpty)
+                TextButton(
+                  onPressed: () async {
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) => AlertDialog(
+                        title: const Text('Kosongkan sampah?'),
+                        content: Text('${items.length} dokumen dihapus permanen.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Batal')),
+                          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Kosongkan')),
+                        ],
+                      ),
+                    );
+                    if (ok == true) await store.emptyTrash();
+                  },
+                  child: const Text('Kosongkan'),
+                ),
+            ],
+          ),
+          body: items.isEmpty
+              ? const Center(child: Text('Sampah kosong. Dokumen terhapus disimpan 30 hari.'))
+              : ListView.builder(
+                  itemCount: items.length,
+                  itemBuilder: (context, i) {
+                    final d = items[i];
+                    return ListTile(
+                      title: Text(d.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      subtitle: Text('${d.pages.length} halaman'),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: 'Pulihkan',
+                            icon: const Icon(Icons.restore),
+                            onPressed: () => store.restore(d),
+                          ),
+                          IconButton(
+                            tooltip: 'Hapus permanen',
+                            icon: const Icon(Icons.delete_forever_outlined),
+                            onPressed: () => store.purge(d),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        );
+      },
+    );
+  }
+}
+
 class _Empty extends StatelessWidget {
   const _Empty();
 
@@ -237,12 +406,18 @@ class _Empty extends StatelessWidget {
 class _DocTile extends StatelessWidget {
   const _DocTile({
     required this.doc,
+    required this.selecting,
+    required this.selected,
+    required this.onLongPress,
     required this.onTap,
     required this.onRename,
     required this.onFolder,
     required this.onDelete,
   });
   final Doc doc;
+  final bool selecting;
+  final bool selected;
+  final VoidCallback onLongPress;
   final VoidCallback onTap;
   final VoidCallback onRename;
   final VoidCallback onFolder;
@@ -255,12 +430,20 @@ class _DocTile extends StatelessWidget {
     return Card(
       clipBehavior: Clip.antiAlias,
       margin: EdgeInsets.zero,
+      color: selected ? t.colorScheme.secondaryContainer : null,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
+              if (selecting)
+                Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: Icon(selected ? Icons.check_circle : Icons.radio_button_unchecked,
+                      color: selected ? t.colorScheme.primary : t.colorScheme.outline),
+                ),
               ClipRRect(
                 borderRadius: BorderRadius.circular(6),
                 child: SizedBox(
@@ -283,6 +466,7 @@ class _DocTile extends StatelessWidget {
                   ],
                 ),
               ),
+              if (!selecting)
               PopupMenuButton<String>(
                 onSelected: (v) => switch (v) {
                   'rename' => onRename(),

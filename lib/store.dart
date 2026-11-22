@@ -23,11 +23,14 @@ class DocStore extends ChangeNotifier {
 
   /// Documents in the chosen order. Pass [folder] to keep only that folder.
   List<Doc> visibleDocs({String? folder}) =>
-      docs.where((d) => folder == null || d.folder == folder).toList()..sort(sort.compare);
+      docs.where((d) => d.deleted == null && (folder == null || d.folder == folder)).toList()..sort(sort.compare);
+
+  /// Documents in the trash, most recently deleted first.
+  List<Doc> get trash => docs.where((d) => d.deleted != null).toList()..sort((a, b) => b.deleted!.compareTo(a.deleted!));
 
   /// Folder names in use, sorted.
   List<String> get folders =>
-      (docs.map((d) => d.folder).whereType<String>().toSet().toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())));
+      (docs.where((d) => d.deleted == null).map((d) => d.folder).whereType<String>().toSet().toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())));
 
   Future<void> setSort(DocSort s) async {
     sort = s;
@@ -72,6 +75,11 @@ class DocStore extends ChangeNotifier {
       }
     }
     docs.sort((a, b) => b.created.compareTo(a.created));
+    // Trash is emptied after 30 days.
+    final old = docs.where((d) => d.deleted != null && DateTime.now().difference(d.deleted!).inDays >= 30).toList();
+    for (final d in old) {
+      await purge(d);
+    }
   }
 
   Future<void> save() async {
@@ -166,21 +174,86 @@ class DocStore extends ChangeNotifier {
     await save();
   }
 
-  Future<void> removePage(Doc doc, int index) async {
+  /// Takes a page out of the document but keeps its files, so it can be
+  /// restored with [restorePage]; call [discardPage] to free the files.
+  Future<PageItem> removePage(Doc doc, int index) async {
     final page = doc.pages.removeAt(index);
+    await save();
+    return page;
+  }
+
+  Future<void> restorePage(Doc doc, int index, PageItem page) async {
+    doc.pages.insert(index.clamp(0, doc.pages.length), page);
+    await save();
+  }
+
+  Future<void> discardPage(PageItem page) async {
     try {
       await File(page.file).delete();
       if (page.original != null) await File(page.original!).delete();
     } catch (_) {}
+  }
+
+  /// Moves a document to the trash.
+  Future<void> delete(Doc doc) async {
+    doc.deleted = DateTime.now();
     await save();
   }
 
-  Future<void> delete(Doc doc) async {
+  Future<void> restore(Doc doc) async {
+    doc.deleted = null;
+    await save();
+  }
+
+  /// Deletes a document and its files for good.
+  Future<void> purge(Doc doc) async {
     docs.remove(doc);
     try {
-      await Directory('${_root.path}/${doc.id}').delete(recursive: true);
+      await _docDir(doc).delete(recursive: true);
     } catch (_) {}
     await save();
+  }
+
+  Future<void> emptyTrash() async {
+    for (final d in trash) {
+      docs.remove(d);
+      try {
+        await _docDir(d).delete(recursive: true);
+      } catch (_) {}
+    }
+    await save();
+  }
+
+  Future<void> setFolderAll(Iterable<Doc> list, String? folder) async {
+    final f = folder?.trim();
+    for (final d in list) {
+      d.folder = (f == null || f.isEmpty) ? null : f;
+    }
+    await save();
+  }
+
+  /// Appends the pages of the other documents to the first one, copying their
+  /// files, and moves the sources to the trash. Returns the merged document.
+  Future<Doc> merge(List<Doc> list) async {
+    final target = list.first;
+    for (final d in list.skip(1)) {
+      for (final p in d.pages) {
+        target.pages.add(PageItem(
+          file: await _copyIn(target, p.file),
+          original: p.original == null ? null : await _copyIn(target, p.original!),
+          quad: p.quad?.toList(),
+          turns: p.turns,
+          filter: p.filter,
+          text: p.text,
+          brightness: p.brightness,
+          contrast: p.contrast,
+          signature: p.signature,
+        ));
+      }
+      d.deleted = DateTime.now();
+    }
+    await save();
+    return target;
   }
 
   Future<File> exportFile(String fileName) async {

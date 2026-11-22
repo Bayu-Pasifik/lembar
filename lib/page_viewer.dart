@@ -271,8 +271,29 @@ class _PageViewerState extends State<PageViewer> {
   }
 
   Future<void> _delete() async {
-    await widget.store.removePage(doc, _index);
+    final at = _index;
+    final store = widget.store;
+    final removed = await store.removePage(doc, at);
     if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.clearSnackBars();
+    var undone = false;
+    messenger
+        .showSnackBar(SnackBar(
+          content: const Text('Halaman dihapus'),
+          action: SnackBarAction(
+            label: 'Urungkan',
+            onPressed: () async {
+              undone = true;
+              await store.restorePage(doc, at, removed);
+              if (mounted) setState(() => _index = at);
+            },
+          ),
+        ))
+        .closed
+        .then((_) {
+      if (!undone) store.discardPage(removed);
+    });
     if (doc.pages.isEmpty) {
       Navigator.pop(context);
       return;

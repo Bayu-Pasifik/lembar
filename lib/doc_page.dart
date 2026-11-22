@@ -116,7 +116,7 @@ Future<void> _importFiles() async {    await importInto(context, widget.store, d
     );
     if (!mounted) return;
     if (doc.pages.isEmpty) {
-      await widget.store.delete(doc);
+      await widget.store.purge(doc);
       if (mounted) Navigator.pop(context);
     } else {
       setState(() {});

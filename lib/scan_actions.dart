@@ -1,6 +1,8 @@
-﻿import 'package:cunning_document_scanner/cunning_document_scanner.dart';
+import 'dart:io';
+
 import 'package:material_ui/material_ui.dart';
 
+import 'camera_page.dart';
 import 'models.dart';
 import 'store.dart';
 
@@ -10,27 +12,22 @@ String defaultName(DateTime t) {
   return 'Dokumen ${t.day} ${bulan[t.month - 1]} ${two(t.hour)}.${two(t.minute)}';
 }
 
-/// Opens the scanner and appends results to [doc] (creating one if null).
+/// Opens the camera and appends results to [doc] (creating one if null).
 /// Returns the document, or null if the user cancelled.
 Future<Doc?> scanInto(BuildContext context, DocStore store, {Doc? doc}) async {
-  final messenger = ScaffoldMessenger.of(context);
-  try {
-    final result = await CunningDocumentScanner.scanDocuments(
-      scannerSource: ScannerSource.cameraAndGallery,
-    );
-    if (result == null || result.images.isEmpty) return null;
-    final target = doc ?? await store.create(defaultName(DateTime.now()));
-    await store.addPages(target, result.images);
-    await CunningDocumentScanner.cleanCache();
-    return target;
-  } on CunningDocumentScannerException catch (e) {
-    messenger.showSnackBar(SnackBar(
-      content: Text(e.code == 'permission_denied'
-          ? 'Izin kamera ditolak. Aktifkan di pengaturan.'
-          : 'Gagal memindai: ${e.message}'),
-    ));
-    return null;
+  final images = await Navigator.push<List<String>>(
+    context,
+    MaterialPageRoute(builder: (_) => const CameraPage()),
+  );
+  if (images == null || images.isEmpty) return null;
+  final target = doc ?? await store.create(defaultName(DateTime.now()));
+  await store.addPages(target, images);
+  for (final f in images) {
+    try {
+      await File(f).delete();
+    } catch (_) {}
   }
+  return target;
 }
 
 /// Bottom sheet listing the filters; resolves to the chosen one (null if dismissed).

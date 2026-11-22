@@ -50,7 +50,6 @@ flutter {
 dependencies {
     // Same artifact the document scanner plugin uses; declared here so MainActivity
     // can warm it up (the plugin declares it as `implementation`, not visible to the app).
-    implementation("com.google.android.gms:play-services-mlkit-document-scanner:16.0.0")
 }
 
 kotlin {

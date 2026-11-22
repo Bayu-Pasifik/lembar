@@ -1,7 +1,11 @@
 ﻿import 'package:material_ui/material_ui.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'package:flutter/foundation.dart';
+
+import 'filters.dart';
 import 'models.dart';
+import 'ocr.dart';
 import 'page_image.dart';
 import 'page_viewer.dart';
 import 'pdf_export.dart';
@@ -30,6 +34,56 @@ class _DocPageState extends State<DocPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal membuat PDF: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  Future<void> _shareImages() async {
+    setState(() => _exporting = true);
+    try {
+      final files = <XFile>[];
+      for (var i = 0; i < doc.pages.length; i++) {
+        final p = doc.pages[i];
+        final r = await compute(processPage, PageJob(p.file, p.turns, p.filter, maxSide: 2400));
+        final f = await widget.store.exportFile('${doc.id}_${i + 1}.jpg');
+        await f.writeAsBytes(r.bytes);
+        files.add(XFile(f.path));
+      }
+      await SharePlus.instance.share(ShareParams(files: files, subject: doc.name));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal membagikan gambar: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  Future<void> _shareText() async {
+    setState(() => _exporting = true);
+    try {
+      final parts = <String>[];
+      for (var i = 0; i < doc.pages.length; i++) {
+        final p = doc.pages[i];
+        p.text ??= await recognizePage(p, widget.store);
+        if (p.text!.isNotEmpty) {
+          parts.add(doc.pages.length > 1 ? '--- Halaman ${i + 1} ---\n${p.text}' : p.text!);
+        }
+      }
+      await widget.store.save();
+      if (parts.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('Tidak ada teks terdeteksi.')));
+        }
+        return;
+      }
+      await SharePlus.instance.share(ShareParams(text: parts.join('\n\n'), subject: doc.name));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('OCR gagal: $e')));
       }
     } finally {
       if (mounted) setState(() => _exporting = false);
@@ -76,6 +130,14 @@ class _DocPageState extends State<DocPage> {
             tooltip: 'Filter semua halaman',
             icon: const Icon(Icons.auto_fix_high),
             onPressed: doc.pages.isEmpty ? null : _filterAll,
+          ),
+          PopupMenuButton<String>(
+            enabled: !_exporting && doc.pages.isNotEmpty,
+            onSelected: (v) => v == 'img' ? _shareImages() : _shareText(),
+            itemBuilder: (_) => const [
+              PopupMenuItem(value: 'img', child: Text('Bagikan sebagai gambar')),
+              PopupMenuItem(value: 'txt', child: Text('Bagikan teks (OCR)')),
+            ],
           ),
           IconButton(
             tooltip: 'Ubah nama',

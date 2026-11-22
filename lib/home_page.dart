@@ -6,9 +6,25 @@ import 'page_image.dart';
 import 'scan_actions.dart';
 import 'store.dart';
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key, required this.store});
   final DocStore store;
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  DocStore get store => widget.store;
+  bool _searching = false;
+  String _query = '';
+
+  bool _matches(Doc d) {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    if (d.name.toLowerCase().contains(q)) return true;
+    return d.pages.any((p) => (p.text ?? '').toLowerCase().contains(q));
+  }
 
   Future<void> _scan(BuildContext context) async {
     final doc = await scanInto(context, store);
@@ -24,11 +40,28 @@ class HomePage extends StatelessWidget {
     return ListenableBuilder(
       listenable: store,
       builder: (context, _) {
-        final docs = store.docs;
+        final docs = store.docs.where(_matches).toList();
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Lembar'),
+            title: _searching
+                ? TextField(
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      hintText: 'Cari nama atau isi dokumen',
+                      border: InputBorder.none,
+                    ),
+                    onChanged: (v) => setState(() => _query = v),
+                  )
+                : const Text('Lembar'),
             actions: [
+              IconButton(
+                tooltip: _searching ? 'Tutup pencarian' : 'Cari',
+                icon: Icon(_searching ? Icons.close : Icons.search),
+                onPressed: () => setState(() {
+                  _searching = !_searching;
+                  _query = '';
+                }),
+              ),
               IconButton(
                 tooltip: 'Filter bawaan: ${store.defaultFilter.label}',
                 icon: const Icon(Icons.tune),
@@ -44,7 +77,9 @@ class HomePage extends StatelessWidget {
             ],
           ),
           body: docs.isEmpty
-              ? const _Empty()
+              ? (_query.trim().isEmpty
+                  ? const _Empty()
+                  : const Center(child: Text('Tidak ada dokumen cocok')))
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
                   itemCount: docs.length,

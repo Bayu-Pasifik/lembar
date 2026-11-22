@@ -102,11 +102,14 @@ class PageItem {
 }
 
 class Doc {
-  Doc({required this.id, required this.name, required this.created, List<PageItem>? pages})
+  Doc({required this.id, required this.name, required this.created, this.folder, List<PageItem>? pages})
       : pages = pages ?? [];
 
   final String id;
   String name;
+
+  /// Optional folder label used to group documents on the home screen.
+  String? folder;
   final DateTime created;
   final List<PageItem> pages;
 
@@ -114,6 +117,7 @@ class Doc {
         'id': id,
         'name': name,
         'created': created.toIso8601String(),
+        if (folder != null) 'folder': folder,
         'pages': pages.map((p) => p.toJson()).toList(),
       };
 
@@ -121,8 +125,28 @@ class Doc {
         id: j['id'] as String,
         name: j['name'] as String,
         created: DateTime.parse(j['created'] as String),
+        folder: j['folder'] as String?,
         pages: (j['pages'] as List)
             .map((p) => PageItem.fromJson(p as Map<String, dynamic>))
             .toList(),
       );
+}
+
+enum DocSort {
+  newest('Terbaru'),
+  oldest('Terlama'),
+  name('Nama A–Z'),
+  pages('Halaman terbanyak');
+
+  const DocSort(this.label);
+  final String label;
+
+  int compare(Doc a, Doc b) => switch (this) {
+        DocSort.newest => b.created.compareTo(a.created),
+        DocSort.oldest => a.created.compareTo(b.created),
+        DocSort.name => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+        DocSort.pages => b.pages.length != a.pages.length
+            ? b.pages.length.compareTo(a.pages.length)
+            : b.created.compareTo(a.created),
+      };
 }

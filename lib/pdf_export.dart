@@ -62,7 +62,13 @@ Future<File> buildPdf(
     } else {
       // Pick the orientation that matches the photo, then fit it inside the sheet.
       format = r.width > r.height ? base.landscape : base;
-      child = pw.Center(child: pw.Image(image, fit: pw.BoxFit.contain));
+      child = pw.Container(
+        width: double.infinity,
+        height: double.infinity,
+        color: PdfColors.white,
+        alignment: pw.Alignment.center,
+        child: pw.Image(image, fit: pw.BoxFit.contain),
+      );
     }
     pdf.addPage(pw.Page(pageFormat: format, margin: pw.EdgeInsets.zero, build: (_) => child));
     onProgress?.call((i + 1) / doc.pages.length);

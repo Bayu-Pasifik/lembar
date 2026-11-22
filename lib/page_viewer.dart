@@ -250,12 +250,18 @@ class _PageViewerState extends State<PageViewer> {
         if (file == null || !mounted) return;
       }
     }
-    final placement = await Navigator.push<SignaturePlacement>(
+    final result = await Navigator.push<SignResult>(
       context,
-      MaterialPageRoute(builder: (_) => SignPlacePage(page: p, signatureFile: file!)),
+      MaterialPageRoute(
+        builder: (_) => SignPlacePage(page: p, signatureFile: file!, pageCount: doc.pages.length),
+      ),
     );
-    if (placement == null) return;
-    setState(() => p.signature = placement);
+    if (result == null) return;
+    setState(() {
+      for (final q in result.all ? doc.pages : [p]) {
+        q.signature = result.placement;
+      }
+    });
     await widget.store.save();
   }
 

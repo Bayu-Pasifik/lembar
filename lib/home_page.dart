@@ -18,6 +18,7 @@ class _HomePageState extends State<HomePage> {
   DocStore get store => widget.store;
   bool _searching = false;
   String _query = '';
+  String? _folder;
 
   bool _matches(Doc d) {
     final q = _query.trim().toLowerCase();
@@ -31,6 +32,11 @@ class _HomePageState extends State<HomePage> {
     if (doc != null && context.mounted) _open(context, doc);
   }
 
+  Future<void> _import(BuildContext context) async {
+    final doc = await importInto(context, store);
+    if (doc != null && context.mounted) _open(context, doc);
+  }
+
   void _open(BuildContext context, Doc doc) {
     Navigator.push(context, MaterialPageRoute(builder: (_) => DocPage(store: store, doc: doc)));
   }
@@ -40,7 +46,9 @@ class _HomePageState extends State<HomePage> {
     return ListenableBuilder(
       listenable: store,
       builder: (context, _) {
-        final docs = store.docs.where(_matches).toList();
+        // A folder that no longer exists (renamed or emptied) falls back to "Semua".
+        final folder = store.folders.contains(_folder) ? _folder : null;
+        final docs = store.visibleDocs(folder: folder).where(_matches).toList();
         return Scaffold(
           appBar: AppBar(
             title: _searching
@@ -62,6 +70,15 @@ class _HomePageState extends State<HomePage> {
                   _query = '';
                 }),
               ),
+              PopupMenuButton<DocSort>(
+                tooltip: 'Urutkan: ${store.sort.label}',
+                icon: const Icon(Icons.sort),
+                initialValue: store.sort,
+                onSelected: store.setSort,
+                itemBuilder: (_) => [
+                  for (final s in DocSort.values) PopupMenuItem(value: s, child: Text(s.label)),
+                ],
+              ),
               IconButton(
                 tooltip: 'Filter bawaan: ${store.defaultFilter.label}',
                 icon: const Icon(Icons.tune),
@@ -76,31 +93,83 @@ class _HomePageState extends State<HomePage> {
               ),
             ],
           ),
-          body: docs.isEmpty
-              ? (_query.trim().isEmpty
-                  ? const _Empty()
-                  : const Center(child: Text('Tidak ada dokumen cocok')))
-              : ListView.separated(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-                  itemCount: docs.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (context, i) => _DocTile(
-                    doc: docs[i],
-                    onTap: () => _open(context, docs[i]),
-                    onRename: () async {
-                      final n = await askName(context, docs[i].name);
-                      if (n != null) {
-                        docs[i].name = n;
-                        await store.save();
-                      }
-                    },
-                    onDelete: () => _confirmDelete(context, docs[i]),
+          body: Column(
+            children: [
+              if (store.folders.isNotEmpty)
+                SizedBox(
+                  height: 52,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ChoiceChip(
+                          label: const Text('Semua'),
+                          selected: folder == null,
+                          onSelected: (_) => setState(() => _folder = null),
+                        ),
+                      ),
+                      for (final f in store.folders)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            avatar: const Icon(Icons.folder_outlined, size: 18),
+                            label: Text(f),
+                            selected: folder == f,
+                            onSelected: (_) => setState(() => _folder = f),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: () => _scan(context),
-            icon: const Icon(Icons.document_scanner_outlined),
-            label: const Text('Pindai'),
+              Expanded(
+                child: docs.isEmpty
+                    ? (_query.trim().isEmpty && folder == null
+                        ? const _Empty()
+                        : const Center(child: Text('Tidak ada dokumen cocok')))
+                    : ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 160),
+                        itemCount: docs.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 8),
+                        itemBuilder: (context, i) => _DocTile(
+                          doc: docs[i],
+                          onTap: () => _open(context, docs[i]),
+                          onRename: () async {
+                            final n = await askName(context, docs[i].name);
+                            if (n != null) {
+                              docs[i].name = n;
+                              await store.save();
+                            }
+                          },
+                          onFolder: () async {
+                            final f = await askFolder(context, store, docs[i].folder);
+                            if (f != null) await store.setFolder(docs[i], f);
+                          },
+                          onDelete: () => _confirmDelete(context, docs[i]),
+                        ),
+                      ),
+              ),
+            ],
+          ),
+          floatingActionButton: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              FloatingActionButton.small(
+                heroTag: 'import',
+                tooltip: 'Impor gambar atau PDF',
+                onPressed: () => _import(context),
+                child: const Icon(Icons.file_open_outlined),
+              ),
+              const SizedBox(height: 12),
+              FloatingActionButton.extended(
+                heroTag: 'scan',
+                onPressed: () => _scan(context),
+                icon: const Icon(Icons.document_scanner_outlined),
+                label: const Text('Pindai'),
+              ),
+            ],
           ),
         );
       },
@@ -152,10 +221,17 @@ class _Empty extends StatelessWidget {
 }
 
 class _DocTile extends StatelessWidget {
-  const _DocTile({required this.doc, required this.onTap, required this.onRename, required this.onDelete});
+  const _DocTile({
+    required this.doc,
+    required this.onTap,
+    required this.onRename,
+    required this.onFolder,
+    required this.onDelete,
+  });
   final Doc doc;
   final VoidCallback onTap;
   final VoidCallback onRename;
+  final VoidCallback onFolder;
   final VoidCallback onDelete;
 
   @override
@@ -188,15 +264,20 @@ class _DocTile extends StatelessWidget {
                   children: [
                     Text(doc.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: t.textTheme.titleMedium),
                     const SizedBox(height: 2),
-                    Text('${doc.pages.length} halaman',
+                    Text(doc.folder == null ? '${doc.pages.length} halaman' : '${doc.folder} · ${doc.pages.length} halaman',
                         style: t.textTheme.bodySmall?.copyWith(color: t.colorScheme.onSurfaceVariant)),
                   ],
                 ),
               ),
               PopupMenuButton<String>(
-                onSelected: (v) => v == 'rename' ? onRename() : onDelete(),
+                onSelected: (v) => switch (v) {
+                  'rename' => onRename(),
+                  'folder' => onFolder(),
+                  _ => onDelete(),
+                },
                 itemBuilder: (_) => const [
                   PopupMenuItem(value: 'rename', child: Text('Ubah nama')),
+                  PopupMenuItem(value: 'folder', child: Text('Pindahkan ke folder')),
                   PopupMenuItem(value: 'delete', child: Text('Hapus')),
                 ],
               ),

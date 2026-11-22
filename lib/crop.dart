@@ -164,3 +164,22 @@ class ScanShot {
   final String? original;
   final Quad? quad;
 }
+
+/// Puts an ID card's front and back on one A4 page (150 dpi), front above
+/// back, on white. [paths] holds the two images. Runs in an isolate via `compute`.
+Future<Uint8List> combineIdCard(List<String> paths) async {
+  const w = 1240, h = 1754, maxW = 1000, maxH = 700;
+  final page = img.Image(width: w, height: h, numChannels: 3);
+  img.fill(page, color: img.ColorRgb8(255, 255, 255));
+  final centres = [h * 0.27, h * 0.73];
+  for (var i = 0; i < paths.length && i < 2; i++) {
+    final decoded = await img.decodeImageFile(paths[i]);
+    if (decoded == null) throw StateError('Gagal membaca gambar: ${paths[i]}');
+    final card = img.bakeOrientation(decoded);
+    final k = math.min(maxW / card.width, maxH / card.height);
+    final cw = (card.width * k).round(), ch = (card.height * k).round();
+    final scaled = img.copyResize(card, width: cw, height: ch, interpolation: img.Interpolation.average);
+    img.compositeImage(page, scaled, dstX: ((w - cw) / 2).round(), dstY: (centres[i] - ch / 2).round());
+  }
+  return Uint8List.fromList(img.encodeJpg(page, quality: 92));
+}

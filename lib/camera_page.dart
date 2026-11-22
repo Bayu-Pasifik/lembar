@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'crop.dart';
 import 'crop_page.dart';
@@ -20,6 +24,10 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
   String? _error;
   bool _busy = false;
   bool _flash = false;
+
+  /// ID card mode: two shots (front, back) become one page.
+  bool _idMode = false;
+  String? _idFront;
 
   @override
   void initState() {
@@ -77,8 +85,25 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
       context,
       MaterialPageRoute(builder: (_) => CropPage(file: path)),
     );
-    if (out != null && mounted) {
+    if (out == null || !mounted) return;
+    if (!_idMode) {
       setState(() => _shots.add(ScanShot(out.path, original: path, quad: out.quad)));
+      return;
+    }
+    final front = _idFront;
+    if (front == null) {
+      setState(() => _idFront = out.path);
+      return;
+    }
+    final bytes = await compute(combineIdCard, [front, out.path]);
+    final tmp = await getTemporaryDirectory();
+    final f = File('${tmp.path}/id_${DateTime.now().microsecondsSinceEpoch}.jpg');
+    await f.writeAsBytes(bytes);
+    if (mounted) {
+      setState(() {
+        _idFront = null;
+        _shots.add(ScanShot(f.path));
+      });
     }
   }
 
@@ -152,14 +177,39 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
               : Column(
                   children: [
                     Expanded(
-                      child: c == null || !c.value.isInitialized
-                          ? const Center(child: CircularProgressIndicator())
-                          : Center(
-                              child: AspectRatio(
-                                aspectRatio: 1 / c.value.aspectRatio,
-                                child: CameraPreview(c),
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: c == null || !c.value.isInitialized
+                                ? const Center(child: CircularProgressIndicator())
+                                : Center(
+                                    child: AspectRatio(
+                                      aspectRatio: 1 / c.value.aspectRatio,
+                                      child: CameraPreview(c),
+                                    ),
+                                  ),
+                          ),
+                          Positioned(
+                            left: 12,
+                            top: 12,
+                            child: FilterChip(
+                              avatar: const Icon(Icons.badge_outlined, size: 18),
+                              label: Text(
+                                !_idMode
+                                    ? 'Kartu ID'
+                                    : _idFront == null
+                                        ? 'Kartu ID · jepret sisi depan'
+                                        : 'Kartu ID · jepret sisi belakang',
                               ),
+                              selected: _idMode,
+                              onSelected: (v) => setState(() {
+                                _idMode = v;
+                                _idFront = null;
+                              }),
                             ),
+                          ),
+                        ],
+                      ),
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),

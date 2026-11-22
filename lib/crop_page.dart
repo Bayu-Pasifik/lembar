@@ -29,6 +29,7 @@ class _CropPageState extends State<CropPage> {
   List<(double, double)> _c = Quad.inset.points;
   bool _busy = false;
   String? _error;
+  int? _active; // corner being dragged, shows the magnifier
 
   @override
   void initState() {
@@ -120,6 +121,9 @@ class _CropPageState extends State<CropPage> {
                                   top: toPx(_c[i]).dy - 28,
                                   child: GestureDetector(
                                     behavior: HitTestBehavior.opaque,
+                                    onPanStart: (_) => setState(() => _active = i),
+                                    onPanEnd: (_) => setState(() => _active = null),
+                                    onPanCancel: () => setState(() => _active = null),
                                     onPanUpdate: _busy
                                         ? null
                                         : (d) => setState(() {
@@ -135,6 +139,14 @@ class _CropPageState extends State<CropPage> {
                                       child: Center(child: _Handle()),
                                     ),
                                   ),
+                                ),
+                              if (_active != null)
+                                _Magnifier(
+                                  bytes: input.bytes,
+                                  imageSize: Size(w, h),
+                                  imageOrigin: Offset(left, top),
+                                  point: _c[_active!],
+                                  area: Size(box.maxWidth, box.maxHeight),
                                 ),
                             ],
                           );
@@ -205,4 +217,62 @@ class _QuadPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_QuadPainter old) => true;
+}
+
+/// Round loupe shown above the finger while a corner is dragged, so the edge
+/// under the fingertip stays visible.
+class _Magnifier extends StatelessWidget {
+  const _Magnifier({
+    required this.bytes,
+    required this.imageSize,
+    required this.imageOrigin,
+    required this.point,
+    required this.area,
+  });
+
+  final Uint8List bytes;
+  final Size imageSize;
+  final Offset imageOrigin;
+  final (double, double) point;
+  final Size area;
+
+  static const _d = 120.0;
+  static const _zoom = 3.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final px = imageOrigin.dx + point.$1 * imageSize.width;
+    final py = imageOrigin.dy + point.$2 * imageSize.height;
+    final left = (px - _d / 2).clamp(8.0, area.width - _d - 8);
+    final top = py < _d + 70 ? py + 50 : py - _d - 50;
+    return Positioned(
+      left: left,
+      top: top,
+      width: _d,
+      height: _d,
+      child: IgnorePointer(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 3),
+            color: Colors.black,
+          ),
+          child: ClipOval(
+            child: Stack(
+              children: [
+                Positioned(
+                  left: _d / 2 - point.$1 * imageSize.width * _zoom,
+                  top: _d / 2 - point.$2 * imageSize.height * _zoom,
+                  width: imageSize.width * _zoom,
+                  height: imageSize.height * _zoom,
+                  child: Image.memory(bytes, fit: BoxFit.fill, filterQuality: FilterQuality.medium),
+                ),
+                const Center(child: Icon(Icons.add, color: Colors.tealAccent, size: 28)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

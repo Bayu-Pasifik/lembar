@@ -156,8 +156,11 @@ Future<Uint8List?> renderSignaturePng(List<List<Offset>> strokes) async {
 /// Lets the user drag and resize the saved signature over a page. Pops the
 /// chosen placement (null when cancelled).
 class SignPlacePage extends StatefulWidget {
-  const SignPlacePage({super.key, required this.page, required this.signatureFile});
+  const SignPlacePage({super.key, required this.page, required this.signatureFile, this.pageCount = 1});
   final PageItem page;
+
+  /// Pages in the document; the "all pages" option only shows when more than one.
+  final int pageCount;
   final String signatureFile;
 
   @override
@@ -170,6 +173,7 @@ class _SignPlacePageState extends State<SignPlacePage> {
   late double _x = widget.page.signature?.x ?? 0.7;
   late double _y = widget.page.signature?.y ?? 0.85;
   late double _w = widget.page.signature?.width ?? 0.3;
+  bool _all = false;
 
   @override
   void initState() {
@@ -266,6 +270,17 @@ class _SignPlacePageState extends State<SignPlacePage> {
                     ],
                   ),
                 ),
+                if (widget.pageCount > 1)
+                  CheckboxListTile(
+                    dense: true,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: Text(
+                      'Terapkan ke semua ${widget.pageCount} halaman',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    value: _all,
+                    onChanged: (v) => setState(() => _all = v ?? false),
+                  ),
                 SafeArea(
                   top: false,
                   child: Padding(
@@ -283,7 +298,10 @@ class _SignPlacePageState extends State<SignPlacePage> {
                         Expanded(
                           child: FilledButton(
                             onPressed: () =>
-                                Navigator.pop(context, SignaturePlacement(widget.signatureFile, _x, _y, _w)),
+                                Navigator.pop(
+                              context,
+                              SignResult(SignaturePlacement(widget.signatureFile, _x, _y, _w), all: _all),
+                            ),
                             child: const Text('Terapkan'),
                           ),
                         ),
@@ -295,4 +313,13 @@ class _SignPlacePageState extends State<SignPlacePage> {
             ),
     );
   }
+}
+
+/// What the user chose in [SignPlacePage].
+class SignResult {
+  const SignResult(this.placement, {required this.all});
+  final SignaturePlacement placement;
+
+  /// Apply the same placement to every page of the document.
+  final bool all;
 }

@@ -19,6 +19,28 @@ class DocStore extends ChangeNotifier {
   /// Saved signature PNG, or null when the user has not drawn one.
   String? signatureFile;
 
+  DocSort sort = DocSort.newest;
+
+  /// Documents in the chosen order. Pass [folder] to keep only that folder.
+  List<Doc> visibleDocs({String? folder}) =>
+      docs.where((d) => folder == null || d.folder == folder).toList()..sort(sort.compare);
+
+  /// Folder names in use, sorted.
+  List<String> get folders =>
+      (docs.map((d) => d.folder).whereType<String>().toSet().toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase())));
+
+  Future<void> setSort(DocSort s) async {
+    sort = s;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  Future<void> setFolder(Doc doc, String? folder) async {
+    final f = folder?.trim();
+    doc.folder = (f == null || f.isEmpty) ? null : f;
+    await save();
+  }
+
   Future<void> load() async {
     final base = await getApplicationDocumentsDirectory();
     _root = Directory('${base.path}/lembar');
@@ -28,6 +50,7 @@ class DocStore extends ChangeNotifier {
     if (await _settings.exists()) {
       try {
         final m = jsonDecode(await _settings.readAsString()) as Map<String, dynamic>;
+        sort = DocSort.values.firstWhere((s) => s.name == m['sort'], orElse: () => DocSort.newest);
         final sig = m['signatureFile'] as String?;
         if (sig != null && await File(sig).exists()) signatureFile = sig;
         defaultFilter = ScanFilter.values.firstWhere(
@@ -69,9 +92,13 @@ class DocStore extends ChangeNotifier {
 
   Directory _docDir(Doc doc) => Directory('${_root.path}/${doc.id}');
 
-  Future<String> _copyIn(Doc doc, String src, [String ext = 'jpg']) async {
+  Future<String> _copyIn(Doc doc, String src) async {
     final dir = _docDir(doc);
     await dir.create(recursive: true);
+    // Keep the real extension: the image decoder picks its format from it.
+    final dot = src.lastIndexOf('.');
+    var ext = dot > src.lastIndexOf('/') ? src.substring(dot + 1).toLowerCase() : 'jpg';
+    if (ext != 'png' && ext != 'jpg' && ext != 'jpeg') ext = 'jpg';
     final dest = '${dir.path}/${DateTime.now().microsecondsSinceEpoch}.$ext';
     await File(src).copy(dest);
     return dest;
@@ -113,6 +140,7 @@ class DocStore extends ChangeNotifier {
   Future<void> _saveSettings() => _settings.writeAsString(jsonEncode({
         'defaultFilter': defaultFilter.name,
         if (signatureFile != null) 'signatureFile': signatureFile,
+        'sort': sort.name,
       }));
 
   /// Saves a newly drawn signature (transparent PNG) and makes it the current one.

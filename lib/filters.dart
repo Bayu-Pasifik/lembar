@@ -295,3 +295,15 @@ Uint8List _boxBlur(Uint8List src, int w, int h, int ch, int r) {
   }
   return dst;
 }
+
+/// Flattens an image with transparency onto white and returns JPEG bytes.
+/// PDF renderers hand back transparent pages; without this they decode as black.
+/// Runs in an isolate via `compute`.
+Future<Uint8List> flattenOnWhite(String file) async {
+  final src = await img.decodeImageFile(file);
+  if (src == null) throw StateError('Gagal membaca gambar: $file');
+  final canvas = img.Image(width: src.width, height: src.height, numChannels: 3);
+  img.fill(canvas, color: img.ColorRgb8(255, 255, 255));
+  img.compositeImage(canvas, src);
+  return Uint8List.fromList(img.encodeJpg(canvas, quality: 92));
+}

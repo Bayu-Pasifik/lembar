@@ -103,6 +103,7 @@ class _DocPageState extends State<DocPage> {
     );
   }
 
+Future<void> _importFiles() async {    await importInto(context, widget.store, doc: doc);    if (mounted) setState(() {});  }
   Future<void> _addPages() async {
     await scanInto(context, widget.store, doc: doc);
     if (mounted) setState(() {});
@@ -134,9 +135,14 @@ class _DocPageState extends State<DocPage> {
             onPressed: doc.pages.isEmpty ? null : _filterAll,
           ),
           PopupMenuButton<String>(
-            enabled: !_exporting && doc.pages.isNotEmpty,
-            onSelected: (v) => v == 'img' ? _shareImages() : _shareText(),
+            enabled: !_exporting,
+            onSelected: (v) => switch (v) {
+              'img' => _shareImages(),
+              'import' => _importFiles(),
+              _ => _shareText(),
+            },
             itemBuilder: (_) => const [
+              PopupMenuItem(value: 'import', child: Text('Impor gambar/PDF ke dokumen ini')),
               PopupMenuItem(value: 'img', child: Text('Bagikan sebagai gambar')),
               PopupMenuItem(value: 'txt', child: Text('Bagikan teks (OCR)')),
             ],

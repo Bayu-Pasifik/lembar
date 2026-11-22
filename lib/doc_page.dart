@@ -27,9 +27,11 @@ class _DocPageState extends State<DocPage> {
   Doc get doc => widget.doc;
 
   Future<void> _export() async {
+    final options = await askPdfOptions(context);
+    if (options == null || !mounted) return;
     setState(() => _exporting = true);
     try {
-      final file = await buildPdf(doc, widget.store);
+      final file = await buildPdf(doc, widget.store, options: options);
       await SharePlus.instance.share(ShareParams(files: [XFile(file.path)], subject: doc.name));
     } catch (e) {
       if (mounted) {
@@ -46,7 +48,7 @@ class _DocPageState extends State<DocPage> {
       final files = <XFile>[];
       for (var i = 0; i < doc.pages.length; i++) {
         final p = doc.pages[i];
-        final r = await compute(processPage, PageJob(p.file, p.turns, p.filter, maxSide: 2400));
+        final r = await compute(processPage, PageJob.of(p, maxSide: 2400));
         final f = await widget.store.exportFile('${doc.id}_${i + 1}.jpg');
         await f.writeAsBytes(r.bytes);
         files.add(XFile(f.path));

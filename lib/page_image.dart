@@ -34,7 +34,7 @@ class _PageImageState extends State<PageImage> {
   bool _loading = false;
   String _key = '';
 
-  String _keyFor(PageItem p) => '${p.file}|${p.turns}|${p.filter.name}|${widget.maxSide}';
+  String _keyFor(PageItem p) => '${p.renderKey}|${widget.maxSide}';
 
   @override
   void initState() {
@@ -66,7 +66,7 @@ class _PageImageState extends State<PageImage> {
       _error = null;
     });
     try {
-      final r = await compute(processPage, PageJob(p.file, p.turns, p.filter, maxSide: widget.maxSide));
+      final r = await compute(processPage, PageJob.of(p, maxSide: widget.maxSide));
       _cache[key] = r.bytes;
       if (_cache.length > _cacheLimit) _cache.remove(_cache.keys.first);
       if (!mounted || _key != key) return;

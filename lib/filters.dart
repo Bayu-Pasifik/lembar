@@ -6,13 +6,43 @@ import 'package:image/image.dart' as img;
 import 'models.dart';
 
 class PageJob {
-  const PageJob(this.file, this.turns, this.filter, {this.maxSide = 0});
+  const PageJob(
+    this.file,
+    this.turns,
+    this.filter, {
+    this.maxSide = 0,
+    this.quality = 85,
+    this.brightness = 0,
+    this.contrast = 1,
+    this.signature,
+  });
+
+  /// The page as the user sees it: rotation, filter, adjustments and signature.
+  factory PageJob.of(PageItem p, {int maxSide = 0, int quality = 85}) => PageJob(
+        p.file,
+        p.turns,
+        p.filter,
+        maxSide: maxSide,
+        quality: quality,
+        brightness: p.brightness,
+        contrast: p.contrast,
+        signature: p.signature,
+      );
+
   final String file;
   final int turns;
   final ScanFilter filter;
 
   /// Longest side in pixels; 0 keeps the original size.
   final int maxSide;
+
+  /// JPEG quality, 1..100.
+  final int quality;
+  final double brightness;
+  final double contrast;
+
+  /// Signature to stamp on the page, if any.
+  final SignaturePlacement? signature;
 }
 
 class PageResult {
@@ -22,7 +52,8 @@ class PageResult {
   final int height;
 }
 
-/// Runs in an isolate via `compute`: decode, rotate, resize, filter, re-encode.
+/// Runs in an isolate via `compute`: decode, rotate, resize, filter, adjust,
+/// stamp signature, re-encode.
 Future<PageResult> processPage(PageJob job) async {
   final decoded = await img.decodeImageFile(job.file);
   if (decoded == null) throw StateError('Gagal membaca gambar: ${job.file}');
@@ -47,10 +78,57 @@ Future<PageResult> processPage(PageJob job) async {
     case ScanFilter.document:
       image = flattenIllumination(image, gray: true);
   }
+
+  if (job.brightness != 0 || job.contrast != 1) {
+    image = adjustBrightnessContrast(image, job.brightness, job.contrast);
+  }
+
+  final sig = job.signature;
+  if (sig != null) {
+    final stamp = await img.decodePngFile(sig.file);
+    if (stamp != null) {
+      image = stampSignature(image, stamp, sig);
+    }
+  }
+
   return PageResult(
-    Uint8List.fromList(img.encodeJpg(image, quality: 85)),
+    Uint8List.fromList(img.encodeJpg(image, quality: job.quality)),
     image.width,
     image.height,
+  );
+}
+
+/// Linear levels: out = (v - 128) * contrast + 128 + brightness * 255.
+img.Image adjustBrightnessContrast(img.Image src, double brightness, double contrast) {
+  final lut = Uint8List(256);
+  for (var v = 0; v < 256; v++) {
+    lut[v] = ((v - 128) * contrast + 128 + brightness * 255).round().clamp(0, 255);
+  }
+  final out = src.convert(format: img.Format.uint8, numChannels: 3);
+  final bytes = out.getBytes(order: img.ChannelOrder.rgb);
+  for (var i = 0; i < bytes.length; i++) {
+    bytes[i] = lut[bytes[i]];
+  }
+  return img.Image.fromBytes(
+    width: out.width,
+    height: out.height,
+    bytes: bytes.buffer,
+    numChannels: 3,
+    order: img.ChannelOrder.rgb,
+  );
+}
+
+/// Alpha-blends [stamp] onto [page] at [at] (centre and width as page fractions).
+img.Image stampSignature(img.Image page, img.Image stamp, SignaturePlacement at) {
+  final w = math.max(8, (at.width * page.width).round());
+  final h = math.max(4, (w * stamp.height / stamp.width).round());
+  final scaled = img.copyResize(stamp, width: w, height: h, interpolation: img.Interpolation.average);
+  final rgb = page.convert(format: img.Format.uint8, numChannels: 3);
+  return img.compositeImage(
+    rgb,
+    scaled,
+    dstX: (at.x * page.width - w / 2).round(),
+    dstY: (at.y * page.height - h / 2).round(),
   );
 }
 

@@ -11,6 +11,11 @@ class Quad {
 
   List<(double, double)> get points => [tl, tr, br, bl];
 
+  /// x,y pairs in tl, tr, br, bl order, for JSON.
+  List<double> toList() => [for (final p in points) ...[p.$1, p.$2]];
+
+  factory Quad.fromList(List<double> v) => Quad((v[0], v[1]), (v[2], v[3]), (v[4], v[5]), (v[6], v[7]));
+
   static const inset = Quad((0.08, 0.08), (0.92, 0.08), (0.92, 0.92), (0.08, 0.92));
   static const full = Quad((0, 0), (1, 0), (1, 1), (0, 1));
 }
@@ -149,4 +154,13 @@ Future<Uint8List> cropQuad(CropJob job) async {
     toImage: dst,
   );
   return Uint8List.fromList(img.encodeJpg(out, quality: 92));
+}
+
+/// A captured page waiting to be stored: the corrected image, plus the photo
+/// and corners it came from (when known) so the crop can be edited later.
+class ScanShot {
+  const ScanShot(this.cropped, {this.original, this.quad});
+  final String cropped;
+  final String? original;
+  final Quad? quad;
 }

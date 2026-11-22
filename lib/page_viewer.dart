@@ -1,10 +1,15 @@
-﻿import 'package:flutter/services.dart';
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:share_plus/share_plus.dart';
 
+import 'crop.dart';
+import 'crop_page.dart';
 import 'models.dart';
 import 'ocr.dart';
 import 'page_image.dart';
+import 'signature_page.dart';
 import 'store.dart';
 
 class PageViewer extends StatefulWidget {
@@ -115,6 +120,145 @@ class _PageViewerState extends State<PageViewer> {
     );
   }
 
+  Future<void> _recrop() async {
+    final p = page;
+    final source = p.original ?? p.file;
+    final initial = p.original != null && p.quad != null ? Quad.fromList(p.quad!) : null;
+    final out = await Navigator.push<CropResult>(
+      context,
+      MaterialPageRoute(builder: (_) => CropPage(file: source, initial: initial)),
+    );
+    if (out == null) return;
+    await widget.store.recrop(doc, p, out.path, out.quad);
+    try {
+      await File(out.path).delete();
+    } catch (_) {}
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _adjust() async {
+    final p = page;
+    var b = p.brightness, c = p.contrast;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Kecerahan & kontras', style: Theme.of(ctx).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                const Text('Kecerahan'),
+                Slider(
+                  value: b,
+                  min: -0.4,
+                  max: 0.4,
+                  onChanged: (v) => setSheet(() => b = v),
+                  onChangeEnd: (v) async {
+                    setState(() => p.brightness = v);
+                    await widget.store.save();
+                  },
+                ),
+                const Text('Kontras'),
+                Slider(
+                  value: c,
+                  min: 0.5,
+                  max: 2,
+                  onChanged: (v) => setSheet(() => c = v),
+                  onChangeEnd: (v) async {
+                    setState(() => p.contrast = v);
+                    await widget.store.save();
+                  },
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () async {
+                      setSheet(() {
+                        b = 0;
+                        c = 1;
+                      });
+                      setState(() {
+                        p.brightness = 0;
+                        p.contrast = 1;
+                      });
+                      await widget.store.save();
+                    },
+                    child: const Text('Setel ulang'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _sign() async {
+    final p = page;
+    var file = widget.store.signatureFile;
+    if (file == null) {
+      file = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(builder: (_) => SignaturePadPage(store: widget.store)),
+      );
+      if (file == null || !mounted) return;
+    } else {
+      final choice = await showModalBottomSheet<String>(
+        context: context,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.draw_outlined),
+                title: const Text('Tempel tanda tangan'),
+                onTap: () => Navigator.pop(ctx, 'place'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.brush_outlined),
+                title: const Text('Buat tanda tangan baru'),
+                onTap: () => Navigator.pop(ctx, 'new'),
+              ),
+              if (p.signature != null)
+                ListTile(
+                  leading: const Icon(Icons.layers_clear_outlined),
+                  title: const Text('Lepas dari halaman ini'),
+                  onTap: () => Navigator.pop(ctx, 'remove'),
+                ),
+            ],
+          ),
+        ),
+      );
+      if (choice == null || !mounted) return;
+      if (choice == 'remove') {
+        setState(() => p.signature = null);
+        await widget.store.save();
+        return;
+      }
+      if (choice == 'new') {
+        file = await Navigator.push<String>(
+          context,
+          MaterialPageRoute(builder: (_) => SignaturePadPage(store: widget.store)),
+        );
+        if (file == null || !mounted) return;
+      }
+    }
+    final placement = await Navigator.push<SignaturePlacement>(
+      context,
+      MaterialPageRoute(builder: (_) => SignPlacePage(page: p, signatureFile: file!)),
+    );
+    if (placement == null) return;
+    setState(() => p.signature = placement);
+    await widget.store.save();
+  }
+
   Future<void> _setFilter(ScanFilter f) async {
     setState(() => page.filter = f);
     await widget.store.save();
@@ -170,17 +314,47 @@ class _PageViewerState extends State<PageViewer> {
       ),
       bottomNavigationBar: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 8,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              for (final f in ScanFilter.values)
-                ChoiceChip(
-                  label: Text(f.label),
-                  selected: page.filter == f,
-                  onSelected: (_) => _setFilter(f),
-                ),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                children: [
+                  for (final f in ScanFilter.values)
+                    ChoiceChip(
+                      label: Text(f.label),
+                      selected: page.filter == f,
+                      onSelected: (_) => _setFilter(f),
+                    ),
+                ],
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  TextButton.icon(
+                    style: TextButton.styleFrom(foregroundColor: Colors.white),
+                    onPressed: _recrop,
+                    icon: const Icon(Icons.crop),
+                    label: const Text('Potong'),
+                  ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(foregroundColor: page.adjusted ? Colors.tealAccent : Colors.white),
+                    onPressed: _adjust,
+                    icon: const Icon(Icons.tune),
+                    label: const Text('Sesuaikan'),
+                  ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: page.signature != null ? Colors.tealAccent : Colors.white,
+                    ),
+                    onPressed: _sign,
+                    icon: const Icon(Icons.draw_outlined),
+                    label: const Text('Tanda tangan'),
+                  ),
+                ],
+              ),
             ],
           ),
         ),

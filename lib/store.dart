@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'crop.dart';
 import 'models.dart';
 
 class DocStore extends ChangeNotifier {
@@ -15,6 +16,9 @@ class DocStore extends ChangeNotifier {
   /// Filter given to newly scanned pages.
   ScanFilter defaultFilter = ScanFilter.document;
 
+  /// Saved signature PNG, or null when the user has not drawn one.
+  String? signatureFile;
+
   Future<void> load() async {
     final base = await getApplicationDocumentsDirectory();
     _root = Directory('${base.path}/lembar');
@@ -24,6 +28,8 @@ class DocStore extends ChangeNotifier {
     if (await _settings.exists()) {
       try {
         final m = jsonDecode(await _settings.readAsString()) as Map<String, dynamic>;
+        final sig = m['signatureFile'] as String?;
+        if (sig != null && await File(sig).exists()) signatureFile = sig;
         defaultFilter = ScanFilter.values.firstWhere(
           (f) => f.name == m['defaultFilter'],
           orElse: () => ScanFilter.document,
@@ -61,22 +67,67 @@ class DocStore extends ChangeNotifier {
     return doc;
   }
 
-  /// Copies scanner cache files into permanent storage and appends them as pages.
-  Future<void> addPages(Doc doc, List<String> sources) async {
-    final dir = Directory('${_root.path}/${doc.id}');
+  Directory _docDir(Doc doc) => Directory('${_root.path}/${doc.id}');
+
+  Future<String> _copyIn(Doc doc, String src, [String ext = 'jpg']) async {
+    final dir = _docDir(doc);
     await dir.create(recursive: true);
-    for (final src in sources) {
-      final name = '${DateTime.now().microsecondsSinceEpoch}.jpg';
-      final dest = '${dir.path}/$name';
-      await File(src).copy(dest);
-      doc.pages.add(PageItem(file: dest, filter: defaultFilter));
+    final dest = '${dir.path}/${DateTime.now().microsecondsSinceEpoch}.$ext';
+    await File(src).copy(dest);
+    return dest;
+  }
+
+  /// Copies cropped shots (and the photos they came from) into permanent
+  /// storage and appends them as pages.
+  Future<void> addPages(Doc doc, List<ScanShot> shots) async {
+    for (final s in shots) {
+      final file = await _copyIn(doc, s.cropped);
+      final original = s.original == null ? null : await _copyIn(doc, s.original!);
+      doc.pages.add(PageItem(
+        file: file,
+        filter: defaultFilter,
+        original: original,
+        quad: s.quad?.toList(),
+      ));
     }
     await save();
   }
 
+  /// Replaces a page's crop. The first re-crop of an old page keeps its current
+  /// image as the source so the crop can be widened again later.
+  Future<void> recrop(Doc doc, PageItem page, String cropped, Quad quad) async {
+    final old = page.file;
+    page.file = await _copyIn(doc, cropped);
+    if (page.original == null) {
+      page.original = old;
+    } else {
+      try {
+        await File(old).delete();
+      } catch (_) {}
+    }
+    page.quad = quad.toList();
+    page.text = null; // OCR no longer matches the new crop
+    await save();
+  }
+
+  Future<void> _saveSettings() => _settings.writeAsString(jsonEncode({
+        'defaultFilter': defaultFilter.name,
+        if (signatureFile != null) 'signatureFile': signatureFile,
+      }));
+
+  /// Saves a newly drawn signature (transparent PNG) and makes it the current one.
+  Future<String> setSignature(Uint8List png) async {
+    final file = File('${_root.path}/signature_${DateTime.now().microsecondsSinceEpoch}.png');
+    await file.writeAsBytes(png);
+    signatureFile = file.path;
+    await _saveSettings();
+    notifyListeners();
+    return file.path;
+  }
+
   Future<void> setDefaultFilter(ScanFilter f) async {
     defaultFilter = f;
-    await _settings.writeAsString(jsonEncode({'defaultFilter': f.name}));
+    await _saveSettings();
     notifyListeners();
   }
 
@@ -91,6 +142,7 @@ class DocStore extends ChangeNotifier {
     final page = doc.pages.removeAt(index);
     try {
       await File(page.file).delete();
+      if (page.original != null) await File(page.original!).delete();
     } catch (_) {}
     await save();
   }

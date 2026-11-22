@@ -6,11 +6,19 @@ import 'package:path_provider/path_provider.dart';
 
 import 'crop.dart';
 
-/// Lets the user drag four corners over a photo, then returns the path of the
-/// perspective-corrected JPEG (null when cancelled).
+/// Result of the crop editor: the corrected image plus the corners used.
+class CropResult {
+  const CropResult(this.path, this.quad);
+  final String path;
+  final Quad quad;
+}
+
+/// Lets the user drag four corners over a photo, then returns the perspective-corrected JPEG
+/// and corners (null when cancelled). [initial] pre-places the corners (e.g. a previous crop).
 class CropPage extends StatefulWidget {
-  const CropPage({super.key, required this.file});
+  const CropPage({super.key, required this.file, this.initial});
   final String file;
+  final Quad? initial;
 
   @override
   State<CropPage> createState() => _CropPageState();
@@ -34,7 +42,7 @@ class _CropPageState extends State<CropPage> {
       if (!mounted) return;
       setState(() {
         _input = r;
-        _c = r.guess.points;
+        _c = (widget.initial ?? r.guess).points;
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -50,7 +58,7 @@ class _CropPageState extends State<CropPage> {
       final tmp = await getTemporaryDirectory();
       final f = File('${tmp.path}/crop_${DateTime.now().microsecondsSinceEpoch}.jpg');
       await f.writeAsBytes(bytes);
-      if (mounted) Navigator.pop(context, f.path);
+      if (mounted) Navigator.pop(context, CropResult(f.path, _quad));
     } catch (e) {
       if (mounted) {
         setState(() => _busy = false);

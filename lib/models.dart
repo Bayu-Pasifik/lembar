@@ -9,9 +9,41 @@
   final String description;
 }
 
-class PageItem {
-  PageItem({required this.file, this.turns = 0, this.filter = ScanFilter.document, this.text});
+/// Where a signature sits on a page: centre (x, y) and width, all as fractions
+/// of the page size.
+class SignaturePlacement {
+  const SignaturePlacement(this.file, this.x, this.y, this.width);
 
+  /// PNG of the signature (transparent background).
+  final String file;
+  final double x;
+  final double y;
+  final double width;
+
+  Map<String, dynamic> toJson() => {'file': file, 'x': x, 'y': y, 'w': width};
+
+  factory SignaturePlacement.fromJson(Map<String, dynamic> j) => SignaturePlacement(
+        j['file'] as String,
+        (j['x'] as num).toDouble(),
+        (j['y'] as num).toDouble(),
+        (j['w'] as num).toDouble(),
+      );
+}
+
+class PageItem {
+  PageItem({
+    required this.file,
+    this.turns = 0,
+    this.filter = ScanFilter.document,
+    this.text,
+    this.original,
+    this.quad,
+    this.brightness = 0,
+    this.contrast = 1,
+    this.signature,
+  });
+
+  /// The cropped page image that everything else renders from.
   String file;
   int turns;
   ScanFilter filter;
@@ -19,8 +51,37 @@ class PageItem {
   /// Cached OCR result. Null means not recognized yet (or invalidated by rotation).
   String? text;
 
-  Map<String, dynamic> toJson() =>
-      {'file': file, 'turns': turns, 'filter': filter.name, if (text != null) 'text': text};
+  /// Full photo the crop was taken from, kept so the crop can be edited later.
+  String? original;
+
+  /// Crop corners on [original]: tl, tr, br, bl as x,y pairs (0..1).
+  List<double>? quad;
+
+  /// -0.5..0.5, added after the filter.
+  double brightness;
+
+  /// 0.5..2.0, 1 = unchanged.
+  double contrast;
+
+  SignaturePlacement? signature;
+
+  bool get adjusted => brightness != 0 || contrast != 1;
+
+  /// Everything that changes how the page looks; used as a cache key.
+  String get renderKey =>
+      '$file|$turns|${filter.name}|$brightness|$contrast|${signature?.file}|${signature?.x}|${signature?.y}|${signature?.width}';
+
+  Map<String, dynamic> toJson() => {
+        'file': file,
+        'turns': turns,
+        'filter': filter.name,
+        if (text != null) 'text': text,
+        if (original != null) 'original': original,
+        if (quad != null) 'quad': quad,
+        if (brightness != 0) 'brightness': brightness,
+        if (contrast != 1) 'contrast': contrast,
+        if (signature != null) 'signature': signature!.toJson(),
+      };
 
   factory PageItem.fromJson(Map<String, dynamic> j) => PageItem(
         file: j['file'] as String,
@@ -30,6 +91,13 @@ class PageItem {
           (f) => f.name == j['filter'],
           orElse: () => ScanFilter.document,
         ),
+        original: j['original'] as String?,
+        quad: (j['quad'] as List?)?.map((e) => (e as num).toDouble()).toList(),
+        brightness: (j['brightness'] as num?)?.toDouble() ?? 0,
+        contrast: (j['contrast'] as num?)?.toDouble() ?? 1,
+        signature: j['signature'] == null
+            ? null
+            : SignaturePlacement.fromJson(j['signature'] as Map<String, dynamic>),
       );
 }
 

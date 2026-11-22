@@ -2,6 +2,7 @@ import 'package:camera/camera.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'crop.dart';
 import 'crop_page.dart';
 
 /// Camera with a manual shutter. Each shot goes through the crop editor;
@@ -15,7 +16,7 @@ class CameraPage extends StatefulWidget {
 
 class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
   CameraController? _ctrl;
-  final List<String> _shots = [];
+  final List<ScanShot> _shots = [];
   String? _error;
   bool _busy = false;
   bool _flash = false;
@@ -72,11 +73,13 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
   }
 
   Future<void> _crop(String path) async {
-    final out = await Navigator.push<String>(
+    final out = await Navigator.push<CropResult>(
       context,
       MaterialPageRoute(builder: (_) => CropPage(file: path)),
     );
-    if (out != null && mounted) setState(() => _shots.add(out));
+    if (out != null && mounted) {
+      setState(() => _shots.add(ScanShot(out.path, original: path, quad: out.quad)));
+    }
   }
 
   Future<void> _shoot() async {
@@ -164,7 +167,7 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           SizedBox(
-                            width: 96,
+                            width: 120,
                             child: Row(
                               children: [
                                 IconButton(
@@ -201,13 +204,13 @@ class _CameraPageState extends State<CameraPage> with WidgetsBindingObserver {
                             ),
                           ),
                           SizedBox(
-                            width: 96,
+                            width: 120,
                             child: Align(
                               alignment: Alignment.centerRight,
                               child: _shots.isEmpty
                                   ? const SizedBox.shrink()
                                   : FilledButton(
-                                      onPressed: _busy ? null : () => Navigator.pop(context, List<String>.of(_shots)),
+                                      onPressed: _busy ? null : () => Navigator.pop(context, List<ScanShot>.of(_shots)),
                                       child: Text('Selesai (${_shots.length})', maxLines: 1, softWrap: false),
                                     ),
                             ),
